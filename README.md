@@ -36,6 +36,12 @@ npm start
 
 Abra [http://localhost:8080](http://localhost:8080). Para usar o servidor Vite padrão, execute `npm run dev`.
 
+## Publicar no Vercel
+
+Importe o repositório no Vercel usando a pasta raiz do projeto. O Vercel detecta Vite automaticamente; use `npm run build` como comando de build e `dist` como diretório de saída.
+
+Em **Project Settings → Environment Variables**, cadastre as variáveis `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_MESSAGING_SENDER_ID` e `VITE_FIREBASE_APP_ID` com os valores do app Web Firebase. `VITE_FIREBASE_MEASUREMENT_ID` é opcional. A configuração local em `.env.local` não é enviada ao repositório; depois de cadastrar ou alterar as variáveis no Vercel, faça um novo deploy para incorporá-las ao build.
+
 ## Configuração do Firebase
 
 ### Firebase Hosting
