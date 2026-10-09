@@ -1,0 +1,33 @@
+mutation SeedDatabase @transaction {
+  user_insertMany(data: [
+    { username: "alice_edu", email: "alice@school.edu", role: "educator" },
+    { username: "bob_student", email: "bob@student.com", role: "student" },
+    { username: "charlie_student", email: "charlie@student.com", role: "student" }
+  ])
+  
+  blueprint_insertMany(data: [
+    { title: "Wooden Chair", subject: "Woodworking", difficultyLevel: "Beginner", instructions: "Cut, sand, assemble.", materialList: "Pine wood, glue", estimatedTime: "4 hours" },
+    { title: "Solar Oven", subject: "Science", difficultyLevel: "Intermediate", instructions: "Line box with foil.", materialList: "Cardboard, foil", estimatedTime: "2 hours" }
+  ])
+
+  classroom_insertMany(data: [
+    { name: "Intro to Woodworking", joinCode: "WOOD101", description: "Learn to build.", educator: { id_expr: "uuidV4()" } }
+  ])
+
+  # Note: In a real scenario, these would reference IDs from the previous insertions.
+  # Using dummy UUIDs for seeds as permitted by the instructions.
+  projectLog_insertMany(data: [
+    { status: "In Progress", updatedAt: "2023-10-27T10:00:00Z", reflectionNotes: "Getting started.", user: { id_expr: "uuidV4()" }, blueprint: { id_expr: "uuidV4()" } },
+    { status: "Completed", updatedAt: "2023-10-28T12:00:00Z", reflectionNotes: "Finished project.", user: { id_expr: "uuidV4()" }, blueprint: { id_expr: "uuidV4()" } }
+  ])
+
+  comment_insertMany(data: [
+    { content: "Great progress!", createdAt: "2023-10-27T11:00:00Z", user: { id_expr: "uuidV4()" }, projectLog: { id_expr: "uuidV4()" } },
+    { content: "Well done!", createdAt: "2023-10-28T13:00:00Z", user: { id_expr: "uuidV4()" }, projectLog: { id_expr: "uuidV4()" } }
+  ])
+
+  classroomStudent_insertMany(data: [
+    { classroom: { id_expr: "uuidV4()" }, student: { id_expr: "uuidV4()" } },
+    { classroom: { id_expr: "uuidV4()" }, student: { id_expr: "uuidV4()" } }
+  ])
+}

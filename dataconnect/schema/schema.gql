@@ -1,0 +1,44 @@
+type User @table {
+  username: String!
+  email: String!
+  role: String!
+  bio: String
+  avatarUrl: String
+}
+
+type Blueprint @table {
+  title: String!
+  subject: String!
+  difficultyLevel: String!
+  instructions: String!
+  materialList: String
+  estimatedTime: String
+}
+
+type ProjectLog @table {
+  status: String!
+  updatedAt: Timestamp!
+  photoUrl: String
+  reflectionNotes: String
+  user: User!
+  blueprint: Blueprint!
+}
+
+type Comment @table {
+  content: String!
+  createdAt: Timestamp!
+  user: User!
+  projectLog: ProjectLog!
+}
+
+type Classroom @table {
+  name: String!
+  joinCode: String!
+  description: String
+  educator: User!
+}
+
+type ClassroomStudent @table(key: ["classroom", "student"]) {
+  classroom: Classroom!
+  student: User!
+}

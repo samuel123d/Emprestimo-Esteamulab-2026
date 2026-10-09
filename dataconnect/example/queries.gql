@@ -1,0 +1,125 @@
+mutation CreateUser {
+  user_insert(data: {
+    id_expr: "auth.uid",
+    username: "newuser",
+    email: "user@example.com",
+    role: "student"
+  })
+}
+
+mutation UpdateUser($username: String, $email: String) @auth(level: USER) {
+  user_update(key: {id_expr: "auth.uid"}, data: {
+    username: $username,
+    email: $email
+  })
+}
+
+query GetCurrentUser @auth(level: USER) {
+  user(key: {id_expr: "auth.uid"}) {
+    username
+    email
+    role
+  }
+}
+
+mutation CreateBlueprint($title: String!, $subject: String!, $difficulty: String!, $instructions: String!) @auth(level: PUBLIC, insecureReason: "Blueprints are shared educational resources.") {
+  blueprint_insert(data: {
+    title: $title,
+    subject: $subject,
+    difficultyLevel: $difficulty,
+    instructions: $instructions
+  })
+}
+
+mutation DeleteBlueprint($id: UUID!) @auth(level: USER) {
+  blueprint_delete(id: $id)
+}
+
+query ListBlueprints @auth(level: PUBLIC, insecureReason: "Blueprints are public resources.") {
+  blueprints {
+    title
+    subject
+    difficultyLevel
+  }
+}
+
+mutation CreateProjectLog($status: String!, $blueprintId: UUID!) @auth(level: USER) {
+  projectLog_insert(data: {
+    status: $status,
+    updatedAt_expr: "request.time",
+    user: {id_expr: "auth.uid"},
+    blueprint: {id: $blueprintId}
+  })
+}
+
+mutation UpdateProjectLog($id: UUID!, $notes: String) @auth(level: USER) {
+  projectLog_update(id: $id, data: {reflectionNotes: $notes})
+}
+
+mutation DeleteProjectLog($id: UUID!) @auth(level: USER) {
+  projectLog_delete(id: $id)
+}
+
+query GetProjectLog($id: UUID!) @auth(level: USER) {
+  projectLog(id: $id) {
+    status
+    reflectionNotes
+  }
+}
+
+query ListMyProjectLogs @auth(level: USER) {
+  projectLogs(where: {userId: {eq_expr: "auth.uid"}}) {
+    status
+    blueprint { title }
+  }
+}
+
+mutation CreateComment($content: String!, $logId: UUID!) @auth(level: USER) {
+  comment_insert(data: {
+    content: $content,
+    createdAt_expr: "request.time",
+    user: {id_expr: "auth.uid"},
+    projectLog: {id: $logId}
+  })
+}
+
+mutation DeleteComment($id: UUID!) @auth(level: USER) {
+  comment_delete(id: $id)
+}
+
+query ListCommentsForLog($logId: UUID!) @auth(level: USER) {
+  comments(where: {projectLogId: {eq: $logId}}) {
+    content
+    user { username }
+  }
+}
+
+mutation CreateClassroom($name: String!, $code: String!) @auth(level: USER) {
+  classroom_insert(data: {
+    name: $name,
+    joinCode: $code,
+    educator: {id_expr: "auth.uid"}
+  })
+}
+
+mutation DeleteClassroom($id: UUID!) @auth(level: USER) {
+  classroom_delete(id: $id)
+}
+
+query ListMyClassrooms @auth(level: USER) {
+  classrooms(where: {educatorId: {eq_expr: "auth.uid"}}) {
+    name
+    joinCode
+  }
+}
+
+mutation JoinClassroom($classroomId: UUID!) @auth(level: USER) {
+  classroomStudent_insert(data: {
+    classroomId_expr: $classroomId,
+    studentId_expr: "auth.uid"
+  })
+}
+
+mutation LeaveClassroom($classroomId: UUID!) @auth(level: USER) {
+  classroomStudent_delete(key: {classroomId: $classroomId, studentId_expr: "auth.uid"})
+}

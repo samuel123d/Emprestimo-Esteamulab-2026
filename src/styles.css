@@ -1,0 +1,93 @@
+/* Cores de fundo e texto usadas no layout geral do aplicativo. */
+body {
+  background: #f4f5f7;
+  color: #212529;
+}
+
+/* Mantém a navegação alinhada à identidade visual escura do sistema. */
+.navbar {
+  background: #2b3035;
+}
+
+/* Dá destaque aos códigos de retirada e devolução. */
+.code {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 2.4rem;
+  letter-spacing: 0.35rem;
+  font-weight: 700;
+}
+
+/* Diferencia produtos selecionáveis dos que já estão emprestados. */
+.item-card {
+  cursor: pointer;
+  border: 2px solid transparent;
+}
+
+.item-card.sel {
+  border-color: #495057;
+}
+
+.item-card.off {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Padroniza a proporcao das fotos nos cartoes de selecao de produto. */
+.product-photo {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+}
+
+/* Mantem miniaturas compactas no catalogo administrativo. */
+.product-photo-thumb {
+  width: 64px;
+  height: 64px;
+  margin-right: 0.75rem;
+  border-radius: 0.35rem;
+  object-fit: cover;
+}
+
+/* Ajusta as cores das abas para combinar com os botões principais. */
+.nav-pills .nav-link {
+  color: #495057;
+}
+
+.nav-pills .nav-link.active {
+  background: #495057;
+  color: #fff;
+}
+
+.btn-dark {
+  background: #495057;
+  border-color: #495057;
+}
+
+/* Destaca a inicial do Google no botão de autenticação social. */
+.google-mark {
+  display: inline-block;
+  margin-right: 0.5rem;
+  color: #4285f4;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+/* Remove a seta do acesso administrativo sem desativar o abrir/fechar do formulário. */
+.admin-login-toggle {
+  list-style: none;
+  cursor: pointer;
+}
+
+.admin-login-toggle::-webkit-details-marker {
+  display: none;
+}
+
+/* Mantém avisos e confirmações visíveis sem deslocar o conteúdo da tela. */
+.toast-box {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 2000;
+  max-width: 340px;
+}

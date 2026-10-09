@@ -1,0 +1,61 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Exige uma sessão autenticada antes de consultar dados do aplicativo.
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // O papel de administrador vem do perfil controlado no Firebase Console.
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // Usuários só podem criar o próprio perfil comum; nenhum cliente pode trocar papéis.
+    match /users/{userId} {
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == userId);
+      allow create: if signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.role == 'user'
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.keys().hasOnly(['name', 'email', 'role', 'createdAt']);
+      allow update: if signedIn()
+        && (request.auth.uid == userId || isAdmin())
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.keys().hasOnly(['name', 'email', 'role', 'createdAt']);
+      // Contas e papéis são administrados pelo Firebase Console, não pelo navegador.
+      allow delete: if false;
+    }
+
+    // Produtos podem ser vistos por usuários autenticados e alterados por administradores.
+    match /items/{itemId} {
+      allow read: if signedIn();
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly(['nome', 'desc', 'photoUrl', 'photoPath']);
+      allow delete: if isAdmin();
+    }
+
+    // Cada usuário consulta seus empréstimos; apenas administradores alteram seu andamento.
+    match /loans/{loanId} {
+      allow read: if isAdmin() || (signedIn() && resource.data.userId == request.auth.uid);
+      allow create: if signedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.status == 'reservado'
+        && request.resource.data.keys().hasOnly([
+          'itemId', 'userId', 'nome', 'contato', 'devolucao', 'codigo', 'status', 'criado'
+        ]);
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Configurações globais só podem ser alteradas por administradores.
+    match /settings/{settingId} {
+      allow read: if signedIn();
+      allow write: if isAdmin() && settingId == 'app';
+    }
+  }
+}
