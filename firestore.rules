@@ -46,7 +46,7 @@ service cloud.firestore {
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.status == 'reservado'
         && request.resource.data.keys().hasOnly([
-          'itemId', 'userId', 'nome', 'contato', 'devolucao', 'codigo', 'status', 'criado'
+          'itemId', 'userId', 'nome', 'contato', 'devolucao', 'codigo', 'codigoEntrega', 'status', 'criado'
         ]);
       allow update: if isAdmin();
       allow delete: if isAdmin();

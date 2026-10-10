@@ -22,6 +22,45 @@ export const diff = date => Math.round((new Date(`${date}T00:00`) - new Date(`${
 // Converte AAAA-MM-DD para o formato brasileiro DD/MM/AAAA.
 export const fmt = date => (date ? date.split('-').reverse().join('/') : '')
 
+// Converte valores de data em objetos Date, aceitando YYYY-MM-DD e timestamps do Firebase.
+export function paraData(value) {
+  if (!value) return null
+  if (value instanceof Date) return value
+  if (typeof value?.toDate === 'function') return value.toDate()
+  if (typeof value === 'string') {
+    const texto = value.trim()
+    if (!texto) return null
+    const iso = /^\d{4}-\d{2}-\d{2}$/.test(texto) ? `${texto}T00:00:00` : texto
+    const data = new Date(iso)
+    return Number.isNaN(data.getTime()) ? null : data
+  }
+  return null
+}
+
+// Exibe datas completas com hora quando o valor contém um horário.
+export function fmtDataHora(value) {
+  const date = paraData(value)
+  if (!date) return '—'
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) return fmt(value)
+  return date.toLocaleString('pt-BR')
+}
+
+// Calcula a duração entre duas datas em dias, horas, minutos e segundos.
+export function tempoEmprestimo(inicio, fim) {
+  const inicioDate = paraData(inicio)
+  const fimDate = paraData(fim)
+  if (!inicioDate || !fimDate) return '—'
+
+  let totalSegundos = Math.floor(Math.max(0, fimDate - inicioDate) / 1000)
+  const dias = Math.floor(totalSegundos / 86400)
+  totalSegundos %= 86400
+  const horas = Math.floor(totalSegundos / 3600)
+  totalSegundos %= 3600
+  const minutos = Math.floor(totalSegundos / 60)
+  const segundos = totalSegundos % 60
+  return `${dias} dia(s), ${horas} hora(s), ${minutos} minuto(s) e ${segundos} segundo(s)`
+}
+
 // Indica se o empréstimo ainda está reservado ou com o produto emprestado.
 export const ativo = loan => loan.status === 'reservado' || loan.status === 'emprestado'
 
@@ -32,12 +71,17 @@ export const itemLivre = (db, itemId) => !db.loans.some(loan => loan.itemId === 
 export const itemNome = (db, itemId) => db.items.find(item => item.id === itemId)?.nome ?? '(removido)'
 
 // Cria um código legível, sem letras e números que costumam ser confundidos.
-export function gerarCodigo(db) {
+export function gerarCodigo(db, usados = []) {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  const bloqueados = new Set([
+    ...(Array.isArray(usados) ? usados : [usados]),
+    ...((db?.loans || []).flatMap(loan => [loan.codigo, loan.codigoEntrega].filter(Boolean))),
+  ])
+
   let code
   do {
     code = Array.from({ length: 6 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('')
-  } while (db.loans.some(loan => loan.codigo === code))
+  } while (bloqueados.has(code))
   return code
 }
 
@@ -60,7 +104,8 @@ export const quando = days => (days < 0
 
 // Monta o link de contato adequado para enviar um lembrete ao usuário.
 export function linkContato(db, loan) {
-  const message = `Olá, ${loan.nome}! Lembrete do ESTEAMULAB: a devolução de "${itemNome(db, loan.itemId)}" ${quando(loan.dias ?? diff(loan.devolucao))} (${fmt(loan.devolucao)}). Código de devolução: ${loan.codigo}.`
+  const codigoDevolucao = loan.codigoEntrega || loan.codigo
+  const message = `Olá, ${loan.nome}! Lembrete do ESTEAMULAB: a devolução de "${itemNome(db, loan.itemId)}" ${quando(loan.dias ?? diff(loan.devolucao))} (${fmt(loan.devolucao)}). Código de devolução: ${codigoDevolucao}.`
   const encodedMessage = encodeURIComponent(message)
   return `mailto:${loan.contato}?subject=${encodeURIComponent('Lembrete de devolução - ESTEAMULAB')}&body=${encodedMessage}`
 }

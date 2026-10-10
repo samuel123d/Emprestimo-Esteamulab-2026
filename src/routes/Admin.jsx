@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { today, fmt, ativo, itemLivre, itemNome, uid, lembretes, quando, linkContato, Status } from '../utils/lib.jsx'
+import { today, fmt, fmtDataHora, ativo, itemLivre, itemNome, uid, lembretes, quando, linkContato, Status, tempoEmprestimo } from '../utils/lib.jsx'
 import { deleteProductPhoto, uploadProductPhoto } from '../services/storageService.js'
 
 // Organiza o painel administrativo em quatro áreas navegáveis.
@@ -39,15 +39,25 @@ function Painel({ db, update, toast }) {
 
   // Avança o empréstimo da reserva para retirada ou da retirada para devolução.
   function validar() {
-    const l = db.loans.find(x => x.codigo === cod.trim().toUpperCase() && ativo(x))
+    const codigo = cod.trim().toUpperCase()
+    const l = db.loans.find(x => ativo(x) && (x.codigo === codigo || x.codigoEntrega === codigo || (!x.codigoEntrega && x.codigo === codigo)))
     if (!l) return toast('Código não encontrado ou já finalizado.')
+
     const nome = itemNome(db, l.itemId)
+    const isRetirada = l.status === 'reservado' && l.codigo === codigo
+    const isEntrega = l.status === 'emprestado' && (l.codigoEntrega === codigo || (!l.codigoEntrega && l.codigo === codigo))
+    if (!isRetirada && !isEntrega) return toast('Código não corresponde ao passo atual do empréstimo.')
+
     update(d => {
       const x = d.loans.find(y => y.id === l.id)
-      if (x.status === 'reservado') { x.status = 'emprestado'; x.retirado = today() }
-      else { x.status = 'devolvido'; x.devolvidoEm = today() }
+      if (!x) return
+      if (isRetirada) {
+        x.status = 'emprestado'; x.retirado = new Date().toISOString()
+      } else {
+        x.status = 'devolvido'; x.devolvidoEm = new Date().toISOString()
+      }
     })
-    toast(l.status === 'reservado' ? `Retirada confirmada: ${nome} com ${l.nome}.` : `Devolução confirmada: ${nome}.`)
+    toast(isRetirada ? `Retirada confirmada: ${nome} com ${l.nome}.` : `Devolução confirmada: ${nome}.`)
     setCod('')
   }
   // Cancela uma reserva sem apagar o histórico do empréstimo.
@@ -78,15 +88,16 @@ function Painel({ db, update, toast }) {
       <div className="card shadow-sm"><div className="card-body">
         <h6>Empréstimos</h6>
         <div className="table-responsive"><table className="table align-middle mb-0">
-          <thead><tr><th>Produto</th><th>Usuário</th><th>Devolução</th><th>Código</th><th>Status</th><th /></tr></thead>
+          <thead><tr><th>Produto</th><th>Usuário</th><th>Devolução</th><th>Retirada</th><th>Entrega</th><th>Status</th><th /></tr></thead>
           <tbody>
-            {db.loans.length === 0 && <tr><td colSpan={6} className="text-muted">Nenhum empréstimo ainda.</td></tr>}
+            {db.loans.length === 0 && <tr><td colSpan={7} className="text-muted">Nenhum empréstimo ainda.</td></tr>}
             {[...db.loans].reverse().map(l => (
               <tr key={l.id}>
                 <td>{itemNome(db, l.itemId)}</td>
                 <td>{l.nome}<div className="small text-muted">{l.contato}</div></td>
                 <td>{fmt(l.devolucao)}</td>
                 <td className="fw-bold">{l.codigo}</td>
+                <td className="fw-bold">{l.codigoEntrega || l.codigo}</td>
                 <td><Status s={l.status} /></td>
                 <td className="text-end">{l.status === 'reservado' && <button className="btn btn-sm btn-outline-secondary" onClick={() => cancelar(l.id)}>Cancelar</button>}</td>
               </tr>
@@ -217,6 +228,13 @@ function Produtos({ db, update, toast }) {
 }
 // Lista os perfis e explica como promover um administrador usando o Firebase Console.
 function Usuarios({ db, toast }) {
+  const [, tick] = useState(0)
+
+  useEffect(() => {
+    const timer = setInterval(() => tick(value => value + 1), 1000)
+    return () => clearInterval(timer)
+  }, [])
+
   // Copia o UID para facilitar a localização do perfil no Firebase Console.
   async function copiarUid(uid) {
     try {
@@ -225,6 +243,23 @@ function Usuarios({ db, toast }) {
     } catch {
       toast('Não foi possível copiar. Selecione o UID manualmente.')
     }
+  }
+
+  function produtosDoUsuario(account) {
+    return db.loans
+      .filter(loan => {
+        if (loan.userId && loan.userId === account.id) return true
+        return !loan.userId && String(loan.contato || '').toLowerCase() === String(account.contato || '').toLowerCase()
+      })
+      .map(loan => {
+        const produto = db.items.find(item => item.id === loan.itemId)
+        return {
+          ...loan,
+          nomeProduto: itemNome(db, loan.itemId),
+          fotoProduto: produto?.photoUrl || '',
+        }
+      })
+      .reverse()
   }
 
   return (
@@ -241,19 +276,46 @@ function Usuarios({ db, toast }) {
       <div className="card shadow-sm"><div className="card-body">
         <h6>Contas cadastradas ({db.users.length})</h6>
         <div className="table-responsive"><table className="table align-middle mb-0">
-          <thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>UID</th></tr></thead>
+          <thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Produtos</th><th>UID</th></tr></thead>
           <tbody>
-            {db.users.map(account => (
-              <tr key={account.id}>
-                <td>{account.nome}</td>
-                <td>{account.contato}</td>
-                <td><span className={`badge text-bg-${account.role === 'admin' ? 'dark' : 'secondary'}`}>
-                  {account.role === 'admin' ? 'administrador' : 'usuário'}
-                </span></td>
-                <td><button className="btn btn-sm btn-outline-secondary" onClick={() => copiarUid(account.id)}>Copiar UID</button></td>
-              </tr>
-            ))}
-            {db.users.length === 0 && <tr><td colSpan={4} className="text-muted">Nenhuma conta carregada.</td></tr>}
+            {db.users.map(account => {
+              const produtos = produtosDoUsuario(account)
+              return (
+                <tr key={account.id}>
+                  <td>{account.nome}</td>
+                  <td>{account.contato}</td>
+                  <td><span className={`badge text-bg-${account.role === 'admin' ? 'dark' : 'secondary'}`}>
+                    {account.role === 'admin' ? 'administrador' : 'usuário'}
+                  </span></td>
+                  <td>
+                    {produtos.length === 0 ? <span className="text-muted">Nenhum</span> : (
+                      <ul className="mb-0 ps-0 small" style={{ listStyle: 'none' }}>
+                        {produtos.map(loan => (
+                          <li key={loan.id} className="mb-3">
+                            <div className="d-flex align-items-center gap-2 mb-1">
+                              {loan.fotoProduto && <img className="product-photo-thumb" src={loan.fotoProduto} alt={`Foto de ${loan.nomeProduto}`} />}
+                              <span className="fw-semibold">{loan.nomeProduto}</span>
+                              <span className="text-muted">({loan.status})</span>
+                            </div>
+                            <div className="text-muted">
+                              Retirada: {loan.retirado ? fmtDataHora(loan.retirado) : '—'}
+                            </div>
+                            <div className="text-muted">
+                              Entrega: {loan.devolvidoEm ? fmtDataHora(loan.devolvidoEm) : '—'}
+                            </div>
+                            <div className="text-muted">
+                              Tempo: {tempoEmprestimo(loan.retirado, loan.devolvidoEm || (loan.status === 'emprestado' ? new Date() : null))}
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </td>
+                  <td><button className="btn btn-sm btn-outline-secondary" onClick={() => copiarUid(account.id)}>Copiar UID</button></td>
+                </tr>
+              )
+            })}
+            {db.users.length === 0 && <tr><td colSpan={5} className="text-muted">Nenhuma conta carregada.</td></tr>}
           </tbody>
         </table></div>
       </div></div>
