@@ -61,6 +61,30 @@ export function tempoEmprestimo(inicio, fim) {
   return `${dias} dia(s), ${horas} hora(s), ${minutos} minuto(s) e ${segundos} segundo(s)`
 }
 
+// Conta o tempo restante até o fim do dia de devolução, ou o atraso acumulado.
+export function tempoRestante(devolucao, agora = new Date()) {
+  if (!devolucao) return '—'
+  const limite = new Date(`${devolucao}T23:59:59`)
+  if (Number.isNaN(limite.getTime())) return '—'
+
+  const diferenca = limite.getTime() - agora.getTime()
+  let segundosTotais = Math.floor(Math.abs(diferenca) / 1000)
+  const dias = Math.floor(segundosTotais / 86400)
+  segundosTotais %= 86400
+  const horas = Math.floor(segundosTotais / 3600)
+  segundosTotais %= 3600
+  const minutos = Math.floor(segundosTotais / 60)
+  const segundos = segundosTotais % 60
+  const duracao = [
+    `${dias} ${dias === 1 ? 'dia' : 'dias'}`,
+    `${horas} ${horas === 1 ? 'hora' : 'horas'}`,
+    `${minutos} ${minutos === 1 ? 'minuto' : 'minutos'}`,
+    `${segundos} ${segundos === 1 ? 'segundo' : 'segundos'}`,
+  ].join(', ')
+
+  return diferenca > 0 ? `Faltam ${duracao}` : `Atrasado há ${duracao}`
+}
+
 // Indica se o empréstimo ainda está reservado ou com o produto emprestado.
 export const ativo = loan => loan.status === 'reservado' || loan.status === 'emprestado'
 
@@ -102,12 +126,37 @@ export const quando = days => (days < 0
       ? 'vence amanhã'
       : `vence em ${days} dias`)
 
-// Monta o link de contato adequado para enviar um lembrete ao usuário.
+// Abre a composição do Gmail com o lembrete preenchido.
+export function linkEmail(db, loan, agora = new Date()) {
+  const codigoDevolucao = loan.codigoEntrega || loan.codigo || 'não informado'
+  const subject = 'Lembrete de devolução - ESTEAMULAB'
+  const body = [
+    `Olá, ${loan.nome || 'usuário'}!`,
+    '',
+    `Este é um lembrete do ESTEAMULAB: a devolução de "${itemNome(db, loan.itemId)}"`,
+    `está prevista para ${fmt(loan.devolucao)} (${quando(loan.dias ?? diff(loan.devolucao))}).`,
+    `Tempo restante para entrega: ${tempoRestante(loan.devolucao, agora)}.`,
+    `Código de devolução: ${codigoDevolucao}.`,
+    '',
+    'Atenciosamente,',
+    'Equipe ESTEAMULAB',
+  ].join('\n')
+  const params = new URLSearchParams({
+    view: 'cm',
+    fs: '1',
+    to: String(loan.contato || '').trim(),
+    su: subject,
+    body,
+  })
+  return `https://mail.google.com/mail/?${params.toString()}`
+}
+
+// Monta o link do WhatsApp para usuários sem endereço de e-mail.
 export function linkContato(db, loan) {
   const codigoDevolucao = loan.codigoEntrega || loan.codigo
   const message = `Olá, ${loan.nome}! Lembrete do ESTEAMULAB: a devolução de "${itemNome(db, loan.itemId)}" ${quando(loan.dias ?? diff(loan.devolucao))} (${fmt(loan.devolucao)}). Código de devolução: ${codigoDevolucao}.`
-  const encodedMessage = encodeURIComponent(message)
-  return `mailto:${loan.contato}?subject=${encodeURIComponent('Lembrete de devolução - ESTEAMULAB')}&body=${encodedMessage}`
+  const phone = String(loan.contato || '').replace(/\D/g, '')
+  return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`
 }
 
 // Apresenta o status do empréstimo com as cores padronizadas do Bootstrap.

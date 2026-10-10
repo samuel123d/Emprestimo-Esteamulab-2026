@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
-import { today, fmt, fmtDataHora, ativo, itemLivre, itemNome, uid, lembretes, quando, linkContato, Status, tempoEmprestimo } from '../utils/lib.jsx'
+import { today, fmt, fmtDataHora, ativo, itemLivre, itemNome, uid, lembretes, quando, linkContato, linkEmail, Status, tempoEmprestimo } from '../utils/lib.jsx'
 import { deleteProductPhoto, uploadProductPhoto } from '../services/storageService.js'
+import { confirmLoanStatus, saveProduct } from '../services/dataService.js'
 
 // Organiza o painel administrativo em quatro áreas navegáveis.
 export default function Admin(props) {
@@ -38,7 +39,7 @@ function Painel({ db, update, toast }) {
   const lem = lembretes(db)
 
   // Avança o empréstimo da reserva para retirada ou da retirada para devolução.
-  function validar() {
+  async function validar() {
     const codigo = cod.trim().toUpperCase()
     const l = db.loans.find(x => ativo(x) && (x.codigo === codigo || x.codigoEntrega === codigo || (!x.codigoEntrega && x.codigo === codigo)))
     if (!l) return toast('Código não encontrado ou já finalizado.')
@@ -48,17 +49,24 @@ function Painel({ db, update, toast }) {
     const isEntrega = l.status === 'emprestado' && (l.codigoEntrega === codigo || (!l.codigoEntrega && l.codigo === codigo))
     if (!isRetirada && !isEntrega) return toast('Código não corresponde ao passo atual do empréstimo.')
 
-    update(d => {
-      const x = d.loans.find(y => y.id === l.id)
-      if (!x) return
-      if (isRetirada) {
-        x.status = 'emprestado'; x.retirado = new Date().toISOString()
-      } else {
-        x.status = 'devolvido'; x.devolvidoEm = new Date().toISOString()
+    try {
+      await confirmLoanStatus(
+        l.id,
+        isRetirada ? 'emprestado' : 'devolvido',
+        isRetirada ? 'retirado' : 'devolvidoEm',
+        new Date().toISOString(),
+      )
+      toast(isRetirada ? `Retirada confirmada: ${nome} com ${l.nome}.` : `Devolução confirmada: ${nome}.`)
+      setCod('')
+    } catch (error) {
+      if (error.code === 'permission-denied') {
+        return toast('O Firestore negou a validação. Publique as regras de firestore.rules e confirme que seu perfil está como admin.')
       }
-    })
-    toast(isRetirada ? `Retirada confirmada: ${nome} com ${l.nome}.` : `Devolução confirmada: ${nome}.`)
-    setCod('')
+      if (error.code === 'not-found') {
+        return toast('Este empréstimo não existe mais no Firestore. Atualize a página e tente novamente.')
+      }
+      toast(`Não foi possível confirmar a validação no Firestore: ${error.message}`)
+    }
   }
   // Cancela uma reserva sem apagar o histórico do empréstimo.
   const cancelar = id => update(d => { d.loans.find(x => x.id === id).status = 'cancelado' })
@@ -71,9 +79,17 @@ function Painel({ db, update, toast }) {
           {lem.map(l => (
             <div key={l.id} className="d-flex justify-content-between align-items-center mt-2 flex-wrap gap-2">
               <span>{l.nome} · {itemNome(db, l.itemId)} · {quando(l.dias)}</span>
-              <a className="btn btn-sm btn-dark" target="_blank" rel="noopener noreferrer" href={linkContato(db, l)}>
-                Avisar {l.contato.includes('@') ? 'por e-mail' : 'no WhatsApp'}
-              </a>
+              {String(l.contato || '').includes('@')
+                ? (
+                  <button className="btn btn-sm btn-dark" onClick={() => window.open(linkEmail(db, l, new Date()), '_blank', 'noopener,noreferrer')}>
+                    Abrir no Gmail
+                  </button>
+                )
+                : (
+                  <a className="btn btn-sm btn-dark" target="_blank" rel="noopener noreferrer" href={linkContato(db, l)}>
+                    Avisar no WhatsApp
+                  </a>
+                )}
             </div>
           ))}
         </div>
@@ -111,12 +127,16 @@ function Painel({ db, update, toast }) {
 
 // Permite ao administrador cadastrar e remover produtos do catálogo compartilhado.
 // Lets administrators create products with an optional camera photo.
-function Produtos({ db, update, toast }) {
+function Produtos({ db, toast }) {
   const [nome, setNome] = useState('')
   const [desc, setDesc] = useState('')
   const [photoFile, setPhotoFile] = useState(null)
   const [photoPreview, setPhotoPreview] = useState('')
   const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [preparingPhoto, setPreparingPhoto] = useState(false)
+  const [uploadStatus, setUploadStatus] = useState('')
+  const [uploadError, setUploadError] = useState('')
 
   // Creates a local preview and releases its temporary URL when the selection changes.
   useEffect(() => {
@@ -136,19 +156,43 @@ function Produtos({ db, update, toast }) {
 
     const id = uid()
     setUploading(true)
+    setUploadProgress(0)
+    setPreparingPhoto(Boolean(photoFile))
+    setUploadStatus(photoFile ? 'Preparando foto...' : '')
+    setUploadError('')
+    let photo
     try {
-      const photo = photoFile ? await uploadProductPhoto(photoFile, id) : {}
-      update(data => {
-        data.items.push({ id, nome: nome.trim(), desc: desc.trim(), ...photo })
-      })
+      photo = photoFile
+        ? await uploadProductPhoto(photoFile, id, (progress, _transferred, _total, phase) => {
+          setPreparingPhoto(phase === 'preparing')
+          setUploadProgress(progress)
+          setUploadStatus(phase === 'preparing'
+            ? 'Preparando foto...'
+            : phase === 'connecting'
+              ? 'Conectando ao Firebase Storage...'
+              : `Enviando foto${progress ? `: ${progress}%` : '...'}`)
+        })
+        : {}
+      setUploadStatus('Salvando produto...')
+      await saveProduct({ id, nome: nome.trim(), desc: desc.trim(), ...photo })
       setNome('')
       setDesc('')
       setPhotoFile(null)
       toast('Produto cadastrado.')
     } catch (error) {
-      toast(error.message || 'Nao foi possivel enviar a foto do produto.')
+      if (photo?.photoPath) {
+        try {
+          await deleteProductPhoto(photo.photoPath)
+        } catch (cleanupError) {
+          setUploadError(`Não foi possível salvar o produto e também não foi possível apagar a foto enviada: ${cleanupError.message}`)
+          return
+        }
+      }
+      setUploadError(error.message || 'Não foi possível enviar a foto do produto.')
     } finally {
       setUploading(false)
+      setPreparingPhoto(false)
+      setUploadStatus('')
     }
   }
 
@@ -196,9 +240,26 @@ function Produtos({ db, update, toast }) {
             <div className="col-12 d-flex align-items-center gap-3 flex-wrap">
               {photoPreview && <img className="product-photo-thumb" src={photoPreview} alt="Previa da foto do produto" />}
               <button className="btn btn-dark" disabled={uploading}>
-                {uploading ? 'Enviando foto...' : 'Adicionar produto'}
+                {uploading ? uploadStatus : 'Adicionar produto'}
               </button>
-              <small className="text-muted">Imagem de ate 5 MB. No celular, use a camera para fotografar.</small>
+              <small className="text-muted">Imagens de até 20 MB são reduzidas automaticamente. No celular, use a câmera para fotografar.</small>
+              {uploadError && <div className="alert alert-danger w-100 mb-0" role="alert">{uploadError}</div>}
+              {uploading && photoFile && !preparingPhoto && (
+                <div
+                  className="progress w-100"
+                  role="progressbar"
+                  aria-label="Progresso do envio da foto"
+                  aria-valuenow={uploadProgress}
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  aria-valuetext={uploadStatus}
+                >
+                  <div
+                    className={`progress-bar ${uploadProgress ? '' : 'progress-bar-striped progress-bar-animated'}`}
+                    style={{ width: `${uploadProgress || 35}%` }}
+                  />
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -91,3 +91,23 @@ body {
   z-index: 2000;
   max-width: 340px;
 }
+
+.overdue-penalty-notice {
+  position: fixed;
+  top: 50%;
+  right: 1rem;
+  z-index: 1050;
+  width: min(360px, calc(100vw - 2rem));
+  margin: 0;
+  transform: translateY(-50%);
+}
+
+@media (max-width: 576px) {
+  .overdue-penalty-notice {
+    top: auto;
+    right: 0.5rem;
+    bottom: 0.5rem;
+    width: calc(100vw - 1rem);
+    transform: none;
+  }
+}

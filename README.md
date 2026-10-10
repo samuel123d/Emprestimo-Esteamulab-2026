@@ -97,9 +97,13 @@ As regras permitem que cada usuário leia seu perfil e seus empréstimos. Admini
 
 Se o documento ainda não existir, crie `users/{UID}` com os campos `name`, `email`, `role` (`admin`) e `createdAt`. A conta deve existir primeiro em Authentication. O papel não pode ser alterado pelo formulário do site.
 
+### Avisos de devolução por e-mail
+
+No painel, **Abrir no Gmail** prepara uma mensagem para o endereço cadastrado, com assunto, data, código e contagem regressiva até o fim do dia de devolução. Na tela **Meus empréstimos**, o tempo restante é atualizado a cada segundo. É necessário estar conectado ao Gmail no navegador; confira a mensagem e clique em **Enviar**. O site não consegue confirmar se ela foi enviada. O envio automático diário não está ativo nesta configuração.
+
 ### Fotos dos produtos (Cloud Storage)
 
-Habilite o Cloud Storage no projeto Firebase. No cadastro de produtos, o administrador pode selecionar uma imagem; em dispositivos móveis, o navegador também pode oferecer a câmera. A foto é armazenada no Storage e seu endereço é salvo com os dados do produto no Firestore. O limite configurado é **5 MB por imagem**.
+Habilite o Cloud Storage no projeto Firebase. No cadastro de produtos, o administrador pode selecionar uma imagem; em dispositivos móveis, o navegador também pode oferecer a câmera. Imagens originais de até **20 MB** são reduzidas automaticamente antes do envio, que é feito com indicação de progresso; o arquivo armazenado tem no máximo **5 MB**. A foto é armazenada no Storage e seu endereço é salvo com os dados do produto no Firestore.
 
 Publique as regras do Storage junto às regras do Firestore:
 

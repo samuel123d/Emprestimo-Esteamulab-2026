@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { today, addDays, diff, fmt, fmtDataHora, ativo, itemLivre, itemNome, gerarCodigo, uid, normContato, quando, Status, tempoEmprestimo } from '../utils/lib.jsx'
+import { today, addDays, diff, fmt, fmtDataHora, ativo, itemLivre, itemNome, gerarCodigo, uid, normContato, quando, Status, tempoEmprestimo, tempoRestante } from '../utils/lib.jsx'
 
 // Formulário que permite escolher um produto e registrar um pedido de empréstimo.
 export function Pedir({ db, update, toast, user }) {
@@ -90,6 +90,7 @@ export function Pedir({ db, update, toast, user }) {
 // Mostra ao usuário o histórico e o andamento dos próprios empréstimos.
 export function Meus({ db, user }) {
   const ls = db.loans.filter(l => l.userId === user.id || (!l.userId && normContato(l.contato) === user.contato)).reverse()
+  const atrasados = ls.filter(l => l.status === 'emprestado' && diff(l.devolucao) < 0)
   const [codigoAberto, setCodigoAberto] = useState(null)
   const [, tick] = useState(0)
 
@@ -108,60 +109,80 @@ export function Meus({ db, user }) {
   }
 
   return (
-    <div className="card shadow-sm"><div className="card-body">
-      <h5 className="mb-3">Meus empréstimos</h5>
-      {ls.length === 0 && <p className="text-muted mb-0">Você ainda não fez nenhum empréstimo.</p>}
-      {ls.map(l => {
-        const d = diff(l.devolucao)
-        const alerta = l.status === 'emprestado' && d <= db.cfg.diasAviso
-        const codigoRetirada = l.codigo
-        const codigoEntrega = l.codigoEntrega || l.codigo
+    <>
+      {atrasados.length > 0 && (
+        <aside className="overdue-penalty-notice alert alert-warning shadow" role="alert" aria-live="assertive">
+          <strong>Aviso de penalidade</strong>
+          <p className="mb-2">
+            {atrasados.length === 1
+              ? `A devolução de ${itemNome(db, atrasados[0].itemId)} está atrasada.`
+              : `Você tem ${atrasados.length} devoluções atrasadas.`}
+          </p>
+          <p className="mb-0">
+            Regularize a devolução com o administrador. Se o atraso acontecer novamente, o administrador poderá banir seu acesso.
+          </p>
+        </aside>
+      )}
+      <div className="card shadow-sm"><div className="card-body">
+        <h5 className="mb-3">Meus empréstimos</h5>
+        {ls.length === 0 && <p className="text-muted mb-0">Você ainda não fez nenhum empréstimo.</p>}
+        {ls.map(l => {
+          const d = diff(l.devolucao)
+          const alerta = l.status === 'emprestado' && d <= db.cfg.diasAviso
+          const codigoRetirada = l.codigo
+          const codigoEntrega = l.codigoEntrega || l.codigo
 
-        const produto = db.items.find(item => item.id === l.itemId)
+          const produto = db.items.find(item => item.id === l.itemId)
 
-        return (
-          <div key={l.id} className={`border rounded p-3 mb-2 ${alerta ? 'border-warning bg-warning-subtle' : ''}`}>
-            <div className="d-flex justify-content-between align-items-start gap-2">
-              <div className="d-flex align-items-center gap-2">
-                {produto?.photoUrl && <img className="product-photo-thumb" src={produto.photoUrl} alt={`Foto de ${itemNome(db, l.itemId)}`} />}
-                <div>
-                  <strong>{itemNome(db, l.itemId)}</strong>
-                  <div className="small text-muted">Devolver até {fmt(l.devolucao)}</div>
+          return (
+            <div key={l.id} className={`border rounded p-3 mb-2 ${alerta ? 'border-warning bg-warning-subtle' : ''}`}>
+              <div className="d-flex justify-content-between align-items-start gap-2">
+                <div className="d-flex align-items-center gap-2">
+                  {produto?.photoUrl && <img className="product-photo-thumb" src={produto.photoUrl} alt={`Foto de ${itemNome(db, l.itemId)}`} />}
+                  <div>
+                    <strong>{itemNome(db, l.itemId)}</strong>
+                    <div className="small text-muted">Devolver até {fmt(l.devolucao)}</div>
+                  </div>
                 </div>
+                <Status s={l.status} />
               </div>
-              <Status s={l.status} />
-            </div>
-            <div className="small text-muted mt-2">
-              Retirada: {l.retirado ? fmtDataHora(l.retirado) : '—'}
-            </div>
-            <div className="small text-muted">
-              Entrega: {l.devolvidoEm ? fmtDataHora(l.devolvidoEm) : '—'}
-            </div>
-            <div className="small text-muted">
-              Tempo com o produto: {tempoEmprestimo(l.retirado, l.devolvidoEm || (l.status === 'emprestado' ? new Date() : null))}
-            </div>
-            {alerta && <div className="fw-semibold mt-1">Atenção: a devolução {quando(d)}.</div>}
-            {l.status === 'reservado' && (
-              <div className="mt-2">
-                <div className="d-flex align-items-center gap-2 flex-wrap">
-                  <span className="small text-muted">Retirada</span>
-                  <button className="btn btn-sm btn-dark" onClick={() => abrirCodigo(l, codigoRetirada, 'retirada')}>Retirar</button>
+              <div className="small text-muted mt-2">
+                Retirada: {l.retirado ? fmtDataHora(l.retirado) : '—'}
+              </div>
+              <div className="small text-muted">
+                Entrega: {l.devolvidoEm ? fmtDataHora(l.devolvidoEm) : '—'}
+              </div>
+              <div className="small text-muted">
+                Tempo com o produto: {tempoEmprestimo(l.retirado, l.devolvidoEm || (l.status === 'emprestado' ? new Date() : null))}
+              </div>
+              {l.status === 'emprestado' && !alerta && (
+                <div className="fw-semibold mt-1">
+                  Tempo restante para entrega: {tempoRestante(l.devolucao)}
                 </div>
-                {codigoAberto === l.id && <div className="fw-bold mt-1" style={{ letterSpacing: '.2rem' }}>{codigoRetirada}</div>}
-              </div>
-            )}
-            {l.status === 'emprestado' && (
-              <div className="mt-2">
-                <div className="d-flex align-items-center gap-2 flex-wrap">
-                  <span className="small text-muted">Entrega</span>
-                  <button className="btn btn-sm btn-dark" onClick={() => abrirCodigo(l, codigoEntrega, 'entrega')}>Entregar</button>
+              )}
+              {alerta && <div className="fw-semibold mt-1">Atenção: a devolução {quando(d)}. Tempo restante para entrega: {tempoRestante(l.devolucao)}.</div>}
+              {l.status === 'reservado' && (
+                <div className="mt-2">
+                  <div className="d-flex align-items-center gap-2 flex-wrap">
+                    <span className="small text-muted">Retirada</span>
+                    <button className="btn btn-sm btn-dark" onClick={() => abrirCodigo(l, codigoRetirada, 'retirada')}>Retirar</button>
+                  </div>
+                  {codigoAberto === l.id && <div className="fw-bold mt-1" style={{ letterSpacing: '.2rem' }}>{codigoRetirada}</div>}
                 </div>
-                {codigoAberto === l.id && <div className="fw-bold mt-1" style={{ letterSpacing: '.2rem' }}>{codigoEntrega}</div>}
-              </div>
-            )}
-          </div>
-        )
-      })}
-    </div></div>
+              )}
+              {l.status === 'emprestado' && (
+                <div className="mt-2">
+                  <div className="d-flex align-items-center gap-2 flex-wrap">
+                    <span className="small text-muted">Entrega</span>
+                    <button className="btn btn-sm btn-dark" onClick={() => abrirCodigo(l, codigoEntrega, 'entrega')}>Entregar</button>
+                  </div>
+                  {codigoAberto === l.id && <div className="fw-bold mt-1" style={{ letterSpacing: '.2rem' }}>{codigoEntrega}</div>}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div></div>
+    </>
   )
 }

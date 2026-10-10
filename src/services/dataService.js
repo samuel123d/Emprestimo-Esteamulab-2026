@@ -6,6 +6,7 @@ import {
   onSnapshot,
   query,
   setDoc,
+  updateDoc,
   where,
 } from 'firebase/firestore'
 import { firestore } from './firebase.js'
@@ -41,6 +42,20 @@ export function subscribeToAppData({ uid, isAdmin, onChange, onError }) {
 
   // Para todas as inscrições, devolve um único cancelador.
   return () => stop.forEach(unsubscribe => unsubscribe())
+}
+
+// Persiste um produto antes de confirmar o cadastro na interface.
+export async function saveProduct(item) {
+  const { id, ...data } = item
+  await setDoc(doc(firestore, 'items', id), data)
+}
+
+// Confirma o avanço de status do empréstimo diretamente no Firestore.
+export async function confirmLoanStatus(id, status, timestampField, timestamp) {
+  await updateDoc(doc(firestore, 'loans', id), {
+    status,
+    [timestampField]: timestamp,
+  })
 }
 
 // Persiste diferenças do estado local sem substituir coleções inteiras no banco.
