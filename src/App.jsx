@@ -7,6 +7,8 @@ import { persistDbChanges, subscribeToAppData } from './services/dataService.js'
 import Auth from './routes/Auth.jsx'
 import Admin from './routes/Admin.jsx'
 import { Meus, Pedir } from './routes/User.jsx'
+import Navbar from './components/Navbar.jsx'
+import Footer from './components/Footer.jsx'
 
 // Valores iniciais exibidos enquanto as coleções do Firestore carregam.
 const EMPTY_DB = { items: [], loans: [], users: [], cfg: { diasAviso: 1, maxDias: 30 } }
@@ -20,7 +22,11 @@ export default function App() {
   const [message, setMessage] = useState('')
   const [repairingProfile, setRepairingProfile] = useState(false)
   const [profileIssue, setProfileIssue] = useState(null)
+  const [creatorEgg, setCreatorEgg] = useState(false)
   const dbRef = useRef(EMPTY_DB)
+  const toastTimerRef = useRef(null)
+  const creatorClicksRef = useRef(0)
+  const creatorClickTimerRef = useRef(null)
 
   // Acompanha login e logout feitos pelo Firebase Authentication.
   useEffect(() => watchAuth(user => {
@@ -95,9 +101,75 @@ export default function App() {
 
   // Exibe uma mensagem temporária para confirmar ações ou informar erros.
   const toast = useCallback(text => {
+    window.clearTimeout(toastTimerRef.current)
     setMessage(text)
-    window.setTimeout(() => setMessage(''), 3500)
+    toastTimerRef.current = window.setTimeout(() => setMessage(''), 3500)
   }, [])
+
+  function playCreatorJingle() {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext
+    if (!AudioContextClass) return
+    const audio = new AudioContextClass()
+    const notes = [587.33, 392, 659.25, 783.99, 523.25]
+    let start = audio.currentTime
+    notes.forEach((frequency, index) => {
+      const oscillator = audio.createOscillator()
+      const volume = audio.createGain()
+      const length = index === notes.length - 1 ? 0.32 : 0.16
+      oscillator.type = index % 2 ? 'square' : 'triangle'
+      oscillator.frequency.setValueAtTime(frequency * 1.12, start)
+      oscillator.frequency.exponentialRampToValueAtTime(frequency, start + 0.07)
+      volume.gain.setValueAtTime(0.0001, start)
+      volume.gain.exponentialRampToValueAtTime(0.11, start + 0.025)
+      volume.gain.exponentialRampToValueAtTime(0.0001, start + length)
+      oscillator.connect(volume); volume.connect(audio.destination)
+      oscillator.start(start); oscillator.stop(start + length + 0.02)
+      start += length + 0.035
+    })
+    const boing = audio.createOscillator()
+    const boingVolume = audio.createGain()
+    boing.type = 'sine'
+    boing.frequency.setValueAtTime(240, start)
+    boing.frequency.exponentialRampToValueAtTime(85, start + 0.36)
+    boingVolume.gain.setValueAtTime(0.0001, start)
+    boingVolume.gain.exponentialRampToValueAtTime(0.12, start + 0.02)
+    boingVolume.gain.exponentialRampToValueAtTime(0.0001, start + 0.38)
+    boing.connect(boingVolume); boingVolume.connect(audio.destination)
+    boing.start(start); boing.stop(start + 0.4)
+    window.setTimeout(() => audio.close().catch(() => {}), 1800)
+  }
+
+  const surpriseCreator = useCallback(() => {
+    setCreatorEgg(true)
+    playCreatorJingle()
+  }, [])
+
+  function countCreatorClick() {
+    creatorClicksRef.current += 1
+    window.clearTimeout(creatorClickTimerRef.current)
+    if (creatorClicksRef.current >= 7) {
+      creatorClicksRef.current = 0
+      surpriseCreator()
+      return
+    }
+    creatorClickTimerRef.current = window.setTimeout(() => { creatorClicksRef.current = 0 }, 2200)
+  }
+
+  useEffect(() => {
+    const secret = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'b', 'a']
+    let position = 0
+    function checkSecret(event) {
+      if (event.target instanceof HTMLElement && (event.target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName))) return
+      const key = event.key.length === 1 ? event.key.toLowerCase() : event.key
+      position = key === secret[position] ? position + 1 : key === secret[0] ? 1 : 0
+      if (position === secret.length) {
+        position = 0
+        surpriseCreator()
+      }
+    }
+    window.addEventListener('keydown', checkSecret)
+    return () => window.removeEventListener('keydown', checkSecret)
+  }, [surpriseCreator])
 
   // Repara um perfil ausente sempre com o papel comum; o Firestore valida a criação.
   async function repairProfile() {
@@ -126,25 +198,13 @@ export default function App() {
   }
 
   // Aguarda a validação da sessão, do perfil e das permissões antes de mostrar a tela.
-  if (loading) return <main className="container py-5 text-center">Carregando...</main>
+  if (loading) return <main className="loading-screen"><img className="loading-logo" src="/logos/esteamulab-logo.png" alt="ESTEAMULAB" /><div className="loading-spinner" /><p>Preparando suas descobertas...</p></main>
 
   const props = { db, update, toast, user: profile }
 
   return (
     <>
-      <nav className="navbar navbar-dark mb-4">
-        <div className="container">
-          <span className="navbar-brand fw-semibold">ESTEAMULAB</span>
-          {profile && (
-            <span className="text-white-50 small d-flex align-items-center gap-3">
-              <span>{profile.nome} ({profile.role === 'admin' ? 'administrador' : 'usuário'})</span>
-              <button className="btn btn-sm btn-outline-light" onClick={() => logoutUser()}>
-                Sair
-              </button>
-            </span>
-          )}
-        </div>
-      </nav>
+      <Navbar profile={profile} onLogout={logoutUser} />
 
       <main className="container pb-5" style={{ maxWidth: 960 }}>
         {!authUser && <Auth toast={toast} />}
@@ -191,9 +251,30 @@ export default function App() {
         )}
       </main>
 
+      <Footer profile={profile} onCreatorClick={countCreatorClick} />
+
+      {creatorEgg && <div className="creator-egg-backdrop" role="presentation">
+        <section className="creator-egg" role="dialog" aria-modal="true" aria-labelledby="creator-egg-title">
+          <button className="creator-egg-close" type="button" aria-label="Fechar surpresa" onClick={() => setCreatorEgg(false)}>×</button>
+          <div className="egg-confetti" aria-hidden="true">{Array.from({ length: 18 }, (_, index) => <i key={index} style={{ '--left': `${index * 5.55}%`, '--duration': `${1.6 + index % 5 * 0.25}s`, '--delay': `${index % 7 * -0.4}s` }} />)}</div>
+          <img className="egg-cashew" src="/caju-favicon.png" alt="" />
+          <img className="egg-portrait" src="/creator/samuel.webp" alt="Samuel, criador do ESTEAMULAB" />
+          <span className="egg-kicker">SEGREDO DESBLOQUEADO</span>
+          <h2 id="creator-egg-title">O criador apareceu!</h2>
+          <p>Samuel Anderson Machado Lopes<br /><strong>Gênio do empréstimo. Lenda do caju.</strong></p>
+          <span className="egg-jingle-note">♪ plim-plim · boing! ♪</span>
+          <button className="btn btn-dark egg-ok" type="button" onClick={() => setCreatorEgg(false)}>Voltar à missão</button>
+        </section>
+      </div>}
+
       {message && (
-        <div className="toast-box">
-          <div className="toast show text-bg-dark"><div className="toast-body">{message}</div></div>
+        <div className="toast-box" role="status" aria-live="polite">
+          <div className="toast-notice" key={message}>
+            <span className="notice-icon" aria-hidden="true"><img src="/caju-favicon.png" alt="" /></span>
+            <div className="notice-copy"><span className="notice-label">ESTEAMULAB · AVISO</span><span>{message}</span></div>
+            <button className="notice-close" type="button" aria-label="Fechar aviso" onClick={() => { window.clearTimeout(toastTimerRef.current); setMessage('') }}>×</button>
+            <span className="notice-progress" />
+          </div>
         </div>
       )}
     </>

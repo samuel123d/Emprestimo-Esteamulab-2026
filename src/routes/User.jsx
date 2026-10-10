@@ -81,14 +81,14 @@ export function Pedir({ db, update, toast, user }) {
           <input type="date" className="form-control" value={data} onChange={e => setData(e.target.value)} min={addDays(1)} max={addDays(db.cfg.maxDias)} />
           <div className="form-text">Máximo de {db.cfg.maxDias} dias.</div>
         </div>
-        <button className="btn btn-dark mt-3" onClick={pedir}>Confirmar empréstimo</button>
+        <button className="btn btn-dark mt-3" data-tooltip="Enviar seu pedido para registro" onClick={pedir}>Confirmar empréstimo</button>
       </div></div>
     </>
   )
 }
 
 // Mostra ao usuário o histórico e o andamento dos próprios empréstimos.
-export function Meus({ db, user }) {
+export function Meus({ db, user, toast }) {
   const ls = db.loans.filter(l => l.userId === user.id || (!l.userId && normContato(l.contato) === user.contato)).reverse()
   const atrasados = ls.filter(l => l.status === 'emprestado' && diff(l.devolucao) < 0)
   const [codigoAberto, setCodigoAberto] = useState(null)
@@ -103,8 +103,10 @@ export function Meus({ db, user }) {
     try {
       await navigator.clipboard.writeText(codigo)
       setCodigoAberto(prev => prev === loan.id ? null : loan.id)
+      toast(`Código de ${tipo} copiado. Apresente-o ao administrador.`)
     } catch {
       setCodigoAberto(prev => prev === loan.id ? null : loan.id)
+      toast(`Código de ${tipo} exibido. Copie ou apresente-o ao administrador.`)
     }
   }
 
@@ -165,7 +167,7 @@ export function Meus({ db, user }) {
                 <div className="mt-2">
                   <div className="d-flex align-items-center gap-2 flex-wrap">
                     <span className="small text-muted">Retirada</span>
-                    <button className="btn btn-sm btn-dark" onClick={() => abrirCodigo(l, codigoRetirada, 'retirada')}>Retirar</button>
+                    <button className="btn btn-sm btn-dark" data-tooltip="Mostrar e copiar o código de retirada" onClick={() => abrirCodigo(l, codigoRetirada, 'retirada')}>Retirar</button>
                   </div>
                   {codigoAberto === l.id && <div className="fw-bold mt-1" style={{ letterSpacing: '.2rem' }}>{codigoRetirada}</div>}
                 </div>
@@ -174,7 +176,7 @@ export function Meus({ db, user }) {
                 <div className="mt-2">
                   <div className="d-flex align-items-center gap-2 flex-wrap">
                     <span className="small text-muted">Entrega</span>
-                    <button className="btn btn-sm btn-dark" onClick={() => abrirCodigo(l, codigoEntrega, 'entrega')}>Entregar</button>
+                    <button className="btn btn-sm btn-dark" data-tooltip="Mostrar e copiar o código de entrega" onClick={() => abrirCodigo(l, codigoEntrega, 'entrega')}>Entregar</button>
                   </div>
                   {codigoAberto === l.id && <div className="fw-bold mt-1" style={{ letterSpacing: '.2rem' }}>{codigoEntrega}</div>}
                 </div>

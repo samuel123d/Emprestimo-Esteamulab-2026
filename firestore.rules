@@ -43,11 +43,37 @@ service cloud.firestore {
     match /loans/{loanId} {
       allow read: if isAdmin() || (signedIn() && resource.data.userId == request.auth.uid);
       allow create: if signedIn()
+        && request.resource.data.keys().hasAll([
+          'itemId', 'userId', 'nome', 'contato', 'devolucao',
+          'codigo', 'codigoEntrega', 'status', 'criado'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'itemId', 'userId', 'nome', 'contato', 'devolucao',
+          'codigo', 'codigoEntrega', 'status', 'criado'
+        ])
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.status == 'reservado'
-        && request.resource.data.keys().hasOnly([
-          'itemId', 'userId', 'nome', 'contato', 'devolucao', 'codigo', 'codigoEntrega', 'status', 'criado'
-        ]);
+        && request.resource.data.itemId is string
+        && request.resource.data.itemId.size() > 0
+        && request.resource.data.itemId.size() <= 128
+        && exists(/databases/$(database)/documents/items/$(request.resource.data.itemId))
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && request.resource.data.nome == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.name
+        && request.resource.data.nome is string
+        && request.resource.data.nome.size() > 0
+        && request.resource.data.nome.size() <= 120
+        && request.resource.data.contato == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.email
+        && request.resource.data.contato is string
+        && request.resource.data.contato.size() <= 254
+        && request.resource.data.devolucao is string
+        && request.resource.data.devolucao.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && request.resource.data.criado is string
+        && request.resource.data.criado.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && request.resource.data.codigo is string
+        && request.resource.data.codigo.matches('^[A-HJ-NP-Z2-9]{6}$')
+        && request.resource.data.codigoEntrega is string
+        && request.resource.data.codigoEntrega.matches('^[A-HJ-NP-Z2-9]{6}$')
+        && request.resource.data.codigo != request.resource.data.codigoEntrega;
       allow update: if isAdmin();
       allow delete: if isAdmin();
     }

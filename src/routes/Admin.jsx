@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { today, fmt, fmtDataHora, ativo, itemLivre, itemNome, uid, lembretes, quando, linkContato, linkEmail, Status, tempoEmprestimo } from '../utils/lib.jsx'
-import { deleteProductPhoto, uploadProductPhoto } from '../services/storageService.js'
-import { confirmLoanStatus, saveProduct } from '../services/dataService.js'
+import { uploadProductPhoto } from '../services/imageService.js'
+import { confirmLoanStatus, deleteProduct, saveProduct } from '../services/dataService.js'
 
 // Organiza o painel administrativo em quatro áreas navegáveis.
 export default function Admin(props) {
@@ -167,10 +167,10 @@ function Produtos({ db, toast }) {
           setPreparingPhoto(phase === 'preparing')
           setUploadProgress(progress)
           setUploadStatus(phase === 'preparing'
-            ? 'Preparando foto...'
-            : phase === 'connecting'
-              ? 'Conectando ao Firebase Storage...'
-              : `Enviando foto${progress ? `: ${progress}%` : '...'}`)
+            ? 'Otimizando foto...'
+            : phase === 'saving'
+              ? 'Salvando foto...'
+              : `Preparando foto${progress ? `: ${progress}%` : '...'}`)
         })
         : {}
       setUploadStatus('Salvando produto...')
@@ -180,14 +180,6 @@ function Produtos({ db, toast }) {
       setPhotoFile(null)
       toast('Produto cadastrado.')
     } catch (error) {
-      if (photo?.photoPath) {
-        try {
-          await deleteProductPhoto(photo.photoPath)
-        } catch (cleanupError) {
-          setUploadError(`Não foi possível salvar o produto e também não foi possível apagar a foto enviada: ${cleanupError.message}`)
-          return
-        }
-      }
       setUploadError(error.message || 'Não foi possível enviar a foto do produto.')
     } finally {
       setUploading(false)
@@ -198,19 +190,17 @@ function Produtos({ db, toast }) {
 
   // Prevents deletion while a product is tied to an active loan.
   async function remove(id) {
-    if (!itemLivre(db, id)) return toast('Este produto tem emprestimo em andamento.')
+    if (!itemLivre(db, id)) return toast('Não é possível remover um produto com empréstimo em andamento.')
     if (!window.confirm('Remover este produto?')) return
 
-    const product = db.items.find(item => item.id === id)
-    update(data => {
-      data.items = data.items.filter(item => item.id !== id)
-    })
-    if (product?.photoPath) {
-      try {
-        await deleteProductPhoto(product.photoPath)
-      } catch {
-        toast('Produto removido, mas nao foi possivel apagar a foto do Storage.')
-      }
+    try {
+      await deleteProduct(id)
+      toast('Produto removido.')
+    } catch (error) {
+      const message = error.code === 'permission-denied'
+        ? 'O Firebase negou a remoção. Confirme se seu perfil está como administrador e publique as regras do Firestore.'
+        : `Não foi possível remover o produto: ${error.message}`
+      toast(message)
     }
   }
 
@@ -242,7 +232,7 @@ function Produtos({ db, toast }) {
               <button className="btn btn-dark" disabled={uploading}>
                 {uploading ? uploadStatus : 'Adicionar produto'}
               </button>
-              <small className="text-muted">Imagens de até 20 MB são reduzidas automaticamente. No celular, use a câmera para fotografar.</small>
+              <small className="text-muted">PNG, JPEG, WebP e outros formatos de imagem de até 20 MB. A foto é otimizada e salva com o produto no banco. No celular, use a câmera para fotografar.</small>
               {uploadError && <div className="alert alert-danger w-100 mb-0" role="alert">{uploadError}</div>}
               {uploading && photoFile && !preparingPhoto && (
                 <div
@@ -433,3 +423,4 @@ function Config({ db, update, toast }) {
     </div></div>
   )
 }
+

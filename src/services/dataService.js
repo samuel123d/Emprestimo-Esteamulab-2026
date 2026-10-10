@@ -50,6 +50,11 @@ export async function saveProduct(item) {
   await setDoc(doc(firestore, 'items', id), data)
 }
 
+// Remove um produto diretamente para que o painel confirme a exclusao real no Firestore.
+export async function deleteProduct(id) {
+  await deleteDoc(doc(firestore, 'items', id))
+}
+
 // Confirma o avanço de status do empréstimo diretamente no Firestore.
 export async function confirmLoanStatus(id, status, timestampField, timestamp) {
   await updateDoc(doc(firestore, 'loans', id), {

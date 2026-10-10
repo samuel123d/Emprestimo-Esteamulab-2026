@@ -6,7 +6,7 @@ Aplicação web para controlar o empréstimo de produtos. Usuários podem criar 
 
 - Node.js e npm instalados.
 - Um projeto Firebase com Authentication e Cloud Firestore habilitados.
-- Para armazenar fotos, Cloud Storage habilitado no Firebase.
+- Fotos de produtos compactadas no navegador e salvas no Firestore junto ao cadastro.
 
 ## Instalação e execução
 
@@ -22,7 +22,6 @@ Configure as variáveis do Firebase copiando `.env.example` para `.env.local` e 
 VITE_FIREBASE_API_KEY=...
 VITE_FIREBASE_AUTH_DOMAIN=...
 VITE_FIREBASE_PROJECT_ID=...
-VITE_FIREBASE_STORAGE_BUCKET=...
 VITE_FIREBASE_MESSAGING_SENDER_ID=...
 VITE_FIREBASE_APP_ID=...
 VITE_FIREBASE_MEASUREMENT_ID=...
@@ -40,7 +39,7 @@ Abra [http://localhost:8080](http://localhost:8080). Para usar o servidor Vite p
 
 Importe o repositório no Vercel usando a pasta raiz do projeto. O Vercel detecta Vite automaticamente; use `npm run build` como comando de build e `dist` como diretório de saída.
 
-Em **Project Settings → Environment Variables**, cadastre as variáveis `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_MESSAGING_SENDER_ID` e `VITE_FIREBASE_APP_ID` com os valores do app Web Firebase. `VITE_FIREBASE_MEASUREMENT_ID` é opcional. A configuração local em `.env.local` não é enviada ao repositório; depois de cadastrar ou alterar as variáveis no Vercel, faça um novo deploy para incorporá-las ao build.
+Em **Project Settings → Environment Variables**, cadastre as variáveis `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_MESSAGING_SENDER_ID` e `VITE_FIREBASE_APP_ID` com os valores do app Web Firebase. `VITE_FIREBASE_MEASUREMENT_ID` é opcional. A configuração local em `.env.local` não é enviada ao repositório; depois de cadastrar ou alterar as variáveis no Vercel, faça um novo deploy para incorporá-las ao build.
 
 ## Configuração do Firebase
 
@@ -101,17 +100,9 @@ Se o documento ainda não existir, crie `users/{UID}` com os campos `name`, `ema
 
 No painel, **Abrir no Gmail** prepara uma mensagem para o endereço cadastrado, com assunto, data, código e contagem regressiva até o fim do dia de devolução. Na tela **Meus empréstimos**, o tempo restante é atualizado a cada segundo. É necessário estar conectado ao Gmail no navegador; confira a mensagem e clique em **Enviar**. O site não consegue confirmar se ela foi enviada. O envio automático diário não está ativo nesta configuração.
 
-### Fotos dos produtos (Cloud Storage)
+### Fotos dos produtos
 
-Habilite o Cloud Storage no projeto Firebase. No cadastro de produtos, o administrador pode selecionar uma imagem; em dispositivos móveis, o navegador também pode oferecer a câmera. Imagens originais de até **20 MB** são reduzidas automaticamente antes do envio, que é feito com indicação de progresso; o arquivo armazenado tem no máximo **5 MB**. A foto é armazenada no Storage e seu endereço é salvo com os dados do produto no Firestore.
-
-Publique as regras do Storage junto às regras do Firestore:
-
-```bash
-firebase deploy --only firestore:rules,storage --project emprestimo-2026
-```
-
-O Cloud Storage for Firebase exige o plano Blaze e uma conta de faturamento vinculada para habilitar o bucket. Consulte os [detalhes oficiais de cobrança](https://firebase.google.com/docs/storage/faqs-storage-changes-announced-sept-2024).
+As imagens são otimizadas no navegador e salvas como Data URL no campo `photoUrl` do produto no Firestore, seguindo o fluxo do repositório S4Solution-Retirada. Não é necessário configurar Cloudinary nem Firebase Storage para enviar fotos. Imagens PNG, JPEG e WebP de até 20 MB são aceitas; antes de salvar, são redimensionadas e convertidas para JPEG para respeitar o limite de tamanho por documento do Firestore.
 
 ## Comandos disponíveis
 
@@ -135,7 +126,6 @@ src/
 ├── main.jsx                # Inicialização do React
 └── styles.css              # Estilos globais
 firestore.rules             # Regras de acesso ao Firestore
-storage.rules               # Regras para fotos no Firebase Storage
 firebase.json               # Configuração de deploy das regras Firebase
 .env.example                # Modelo das variáveis de configuração
 ```

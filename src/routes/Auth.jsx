@@ -26,6 +26,8 @@ export default function Auth({ toast }) {
   const [form, setForm] = useState({ name: '', email: '', password: '', confirmPassword: '' })
   const [adminForm, setAdminForm] = useState({ email: '', password: '' })
   const [sending, setSending] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
 
   // Mantém o campo correspondente sincronizado com o formulário.
   function changeField(field) {
@@ -120,14 +122,24 @@ export default function Auth({ toast }) {
   }
 
   return (
-    <section className="card shadow-sm mx-auto" style={{ maxWidth: 420 }}>
+    <section className="auth-layout">
+      <div className="auth-intro">
+        <div className="auth-orbit auth-orbit-one" /><div className="auth-orbit auth-orbit-two" />
+        <img className="auth-brand-logo" src="/logos/esteamulab-logo.png" alt="ESTEAMULAB — Espaço para pensar, criar e inovar" />
+        <span className="auth-kicker">CRIAR · EXPLORAR · APRENDER</span>
+        <h1>Ideias em movimento.<br /><span>Conhecimento compartilhado.</span></h1>
+        <p>Um espaço para emprestar, experimentar e transformar curiosidade em novas descobertas.</p>
+        <div className="auth-steps"><span>01 <b>Escolha</b></span><span>02 <b>Explore</b></span><span>03 <b>Compartilhe</b></span></div>
+      </div>
+      <div className="card auth-card">
       <div className="card-body">
+        <div className="auth-card-heading"><span className="auth-mini-icon"><img src="/caju-favicon.png" alt="" /></span><div><h2>{isRegistering ? 'Sua próxima ideia começa aqui' : 'Que bom ter você por aqui'}</h2><p>{isRegistering ? 'Crie sua conta para começar a explorar.' : 'Entre e continue de onde a curiosidade te levar.'}</p></div></div>
         <h5 className="mb-2">{isRegistering ? 'Criar conta de usuário' : 'Acessar o sistema'}</h5>
         <p className="text-muted small mb-3">
           Usuários podem entrar com e-mail e senha ou Google. Contas de administrador são criadas no Firebase.
         </p>
 
-        <button type="button" className="btn btn-outline-secondary w-100" onClick={submitGoogle} disabled={sending}>
+        <button type="button" className="btn btn-outline-secondary w-100 auth-google" data-tooltip="Entre com a sua conta Google" onClick={submitGoogle} disabled={sending}>
           <span className="google-mark" aria-hidden="true">G</span>
           Continuar com Google
         </button>
@@ -147,21 +159,39 @@ export default function Auth({ toast }) {
           )}
 
           <label className="form-label" htmlFor="auth-email">E-mail</label>
-          <input id="auth-email" type="email" className="form-control mb-2" value={form.email} onChange={changeField('email')} autoComplete="email" required />
+          <input id="auth-email" type="email" className="form-control mb-2" placeholder="Digite seu e-mail" value={form.email} onChange={changeField('email')} autoComplete="email" required />
 
           <label className="form-label" htmlFor="auth-password">Senha</label>
-          <input id="auth-password" type="password" className="form-control" value={form.password} onChange={changeField('password')} autoComplete={isRegistering ? 'new-password' : 'current-password'} minLength={6} required />
+          <div className="password-field">
+            <input id="auth-password" type={showPassword ? 'text' : 'password'} className="form-control" placeholder="Digite sua senha" value={form.password} onChange={changeField('password')} autoComplete={isRegistering ? 'new-password' : 'current-password'} minLength={6} required />
+            <button className="password-visibility" type="button" onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'} aria-pressed={showPassword} title={showPassword ? 'Ocultar senha' : 'Mostrar senha'}>
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                {showPassword
+                  ? <><path d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12Z" /><circle cx="12" cy="12" r="3" /></>
+                  : <><path d="M3 3l18 18" /><path d="M10.6 10.6a2 2 0 0 0 2.8 2.8" /><path d="M9.9 5.2A10.8 10.8 0 0 1 12 5c5 0 8.5 4.5 9.5 6.2a1.5 1.5 0 0 1 0 1.6 13 13 0 0 1-3 3.4" /><path d="M6.2 6.2a13.4 13.4 0 0 0-3.7 5 1.5 1.5 0 0 0 0 1.6C3.5 14.5 7 19 12 19a10 10 0 0 0 3-.5" /></>}
+              </svg>
+            </button>
+          </div>
 
           {isRegistering ? (
             <>
               <label className="form-label mt-2" htmlFor="auth-confirm-password">Confirmar senha</label>
-              <input id="auth-confirm-password" type="password" className="form-control" value={form.confirmPassword} onChange={changeField('confirmPassword')} autoComplete="new-password" minLength={6} required />
+              <div className="password-field">
+                <input id="auth-confirm-password" type={showConfirmPassword ? 'text' : 'password'} className="form-control" placeholder="Repita sua senha" value={form.confirmPassword} onChange={changeField('confirmPassword')} autoComplete="new-password" minLength={6} required />
+                <button className="password-visibility" type="button" onClick={() => setShowConfirmPassword(value => !value)} aria-label={showConfirmPassword ? 'Ocultar confirmação da senha' : 'Mostrar confirmação da senha'} aria-pressed={showConfirmPassword} title={showConfirmPassword ? 'Ocultar senha' : 'Mostrar senha'}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    {showConfirmPassword
+                      ? <><path d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12Z" /><circle cx="12" cy="12" r="3" /></>
+                      : <><path d="M3 3l18 18" /><path d="M10.6 10.6a2 2 0 0 0 2.8 2.8" /><path d="M9.9 5.2A10.8 10.8 0 0 1 12 5c5 0 8.5 4.5 9.5 6.2a1.5 1.5 0 0 1 0 1.6 13 13 0 0 1-3 3.4" /><path d="M6.2 6.2a13.4 13.4 0 0 0-3.7 5 1.5 1.5 0 0 0 0 1.6C3.5 14.5 7 19 12 19a10 10 0 0 0 3-.5" /></>}
+                  </svg>
+                </button>
+              </div>
             </>
           ) : (
-            <button type="button" className="btn btn-link p-0 small mt-2" onClick={resetPassword}>Esqueci minha senha</button>
+            <button type="button" className="btn btn-link p-0 small mt-2" data-tooltip="Enviaremos um link para o seu e-mail" onClick={resetPassword}>Esqueci minha senha</button>
           )}
 
-          <button className="btn btn-dark w-100 mt-3" disabled={sending}>
+          <button className="btn btn-dark w-100 mt-3 auth-submit" data-tooltip={isRegistering ? 'Criar sua conta e começar' : 'Acessar o sistema'} disabled={sending}>
             {sending ? 'Aguarde...' : isRegistering ? 'Criar conta de usuário' : 'Entrar'}
           </button>
         </form>
@@ -171,6 +201,15 @@ export default function Auth({ toast }) {
           <a href="#auth" onClick={toggleMode}>{isRegistering ? 'Entrar' : 'Cadastrar usuário'}</a>
         </div>
 
+      </div>
+      </div>
+      <div className="institutional-logos" aria-label="Instituições parceiras">
+        <span className="institutional-label">UMA INICIATIVA EM REDE</span>
+        <div className="institutional-logo-row">
+          <img className="logo-ufrn" src="/logos/ufrn.png" alt="Universidade Federal do Rio Grande do Norte" />
+          <img className="logo-giife" src="/logos/giife.png" alt="GIIfE" />
+          <img className="logo-imd" src="/logos/imd.png" alt="Instituto Metrópole Digital" />
+        </div>
       </div>
     </section>
   )
