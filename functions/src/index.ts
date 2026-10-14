@@ -1,4 +1,4 @@
-import {randomUUID} from "node:crypto";
+import {randomBytes, randomUUID} from "node:crypto";
 import {initializeApp} from "firebase-admin/app";
 import {FieldValue, getFirestore, Timestamp} from "firebase-admin/firestore";
 import {logger, setGlobalOptions} from "firebase-functions";
@@ -15,6 +15,119 @@ const smtpAppPassword = defineSecret("SMTP_APP_PASSWORD");
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const staleClaimMilliseconds = 15 * 60 * 1000;
 
+const codeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+export function generateCode(existing: Set<string>): string {
+  let code: string;
+  do {
+    code = Array.from(randomBytes(6), (b) =>
+      codeAlphabet[b % codeAlphabet.length],
+    ).join("");
+  } while (existing.has(code));
+  return code;
+}
+
+//empréstimo com verificação de se não tá duplicado e geração segura de códigos
+
+export const createLoan = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Entre para fazer um empréstimo.");
+  }
+
+  const {itemId, devolucao} = request.data ?? {};
+  if (typeof itemId !== "string" || !itemId || itemId.length > 128) {
+    throw new HttpsError("invalid-argument", "Produto inválido.");
+  }
+  if (
+    typeof devolucao !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(devolucao)
+  ) {
+    throw new HttpsError("invalid-argument", "Data de devolução inválida.");
+  }
+
+  const db = getFirestore();
+  const uid = request.auth.uid;
+
+  // Valida se o produto existe
+  const itemDoc = await db.collection("items").doc(itemId).get();
+  if (!itemDoc.exists) {
+    throw new HttpsError("not-found", "Produto não encontrado.");
+  }
+
+  // Valida se o usuário existe
+  const userDoc = await db.collection("users").doc(uid).get();
+  if (!userDoc.exists) {
+    throw new HttpsError("not-found", "Perfil não encontrado.");
+  }
+  const userData = userDoc.data()!;
+
+  // Valida o prazo máximo
+  const settingsDoc = await db.collection("settings").doc("app").get();
+  const maxDias = settingsDoc.data()?.maxDias ?? 30;
+  const today = dateInSaoPaulo(0);
+  if (devolucao <= today) {
+    throw new HttpsError(
+      "invalid-argument",
+      "A data de devolução deve ser futura.",
+    );
+  }
+  const maxDate = dateInSaoPaulo(maxDias);
+  if (devolucao > maxDate) {
+    throw new HttpsError(
+      "invalid-argument",
+      `Prazo máximo de ${maxDias} dias.`,
+    );
+  }
+
+  // Verifica se já existe empréstimo ativo para este produto
+  const activeLoan = await db
+    .collection("loans")
+    .where("itemId", "==", itemId)
+    .where("status", "in", ["reservado", "emprestado"])
+    .limit(1)
+    .get();
+  if (!activeLoan.empty) {
+    throw new HttpsError(
+      "already-exists",
+      "Este produto já possui um empréstimo ativo.",
+    );
+  }
+
+  // Coleta códigos existentes para evitar colisões
+  const allLoans = await db.collection("loans")
+    .select("codigo", "codigoEntrega")
+    .get();
+  const usedCodes = new Set<string>();
+  for (const doc of allLoans.docs) {
+    const d = doc.data();
+    if (d.codigo) usedCodes.add(d.codigo);
+    if (d.codigoEntrega) usedCodes.add(d.codigoEntrega);
+  }
+
+  const codigo = generateCode(usedCodes);
+  usedCodes.add(codigo);
+  const codigoEntrega = generateCode(usedCodes);
+
+  const loanRef = db.collection("loans").doc();
+  await loanRef.set({
+    itemId,
+    userId: uid,
+    nome: userData.name || "",
+    contato: userData.email || "",
+    devolucao,
+    codigo,
+    codigoEntrega,
+    status: "reservado",
+    criado: today,
+  });
+
+  return {
+    id: loanRef.id,
+    codigo,
+    codigoEntrega,
+  };
+});
+
 interface Loan {
   contato?: string;
   nome?: string;
@@ -28,9 +141,7 @@ interface Loan {
   emailReminderClaimToken?: string;
 }
 
-/**
- * Sends a reminder on demand, only for an authenticated administrator.
- */
+  // Envia um lembrete sob demanda, apenas para administradores autenticados
 export const sendLoanReminder = onCall(
   {secrets: [smtpUser, smtpAppPassword]},
   async (request) => {
@@ -60,7 +171,7 @@ export const sendLoanReminder = onCall(
       return {success: true, alreadySent: !sent};
     } catch (error) {
       if (error instanceof HttpsError) throw error;
-      logger.error("Manual loan reminder failed", {
+      logger.error("Falha ao enviar lembrete manual", {
         loanId,
         errorCode: getErrorCode(error),
         responseCode: getResponseCode(error),
@@ -70,9 +181,9 @@ export const sendLoanReminder = onCall(
   },
 );
 
-/**
- * Sends due reminders daily at 09:00 in Sao Paulo, once per loan.
- */
+
+   // Envia lembretes de devolução diariamente às 09:00 (São Paulo), uma vez por empréstimo.
+ 
 export const sendAutomaticLoanReminders = onSchedule(
   {
     schedule: "0 9 * * *",
@@ -99,7 +210,7 @@ export const sendAutomaticLoanReminders = onSchedule(
         await sendReminderOnce(db, loanSnapshot.id);
       } catch (error) {
         failures.push(loanSnapshot.id);
-        logger.error("Automatic loan reminder failed", {
+        logger.error("Falha ao enviar lembrete automático", {
           loanId: loanSnapshot.id,
           errorCode: getErrorCode(error),
           responseCode: getResponseCode(error),
@@ -109,17 +220,17 @@ export const sendAutomaticLoanReminders = onSchedule(
 
     if (failures.length) {
       throw new Error(
-        `Failed to send automatic reminders for ${failures.length} loan(s).`,
+        `Falha ao enviar lembretes automáticos para ${failures.length} empréstimo(s).`,
       );
     }
   },
 );
 
 /**
- * Claims and sends a loan reminder at most once.
- * @param {FirebaseFirestore.Firestore} db Firestore instance.
- * @param {string} loanId Loan document ID.
- * @return {Promise<boolean>} Whether this call sent the email.
+ * Reserva e envia um lembrete de empréstimo no máximo uma vez
+ * @param {FirebaseFirestore.Firestore} db Instância do Firestore
+ * @param {string} loanId ID do documento do empréstimo
+ * @return {Promise<boolean>} Se esta chamada enviou o e-mail
  */
 async function sendReminderOnce(
   db: FirebaseFirestore.Firestore,
@@ -189,10 +300,10 @@ async function sendReminderOnce(
 }
 
 /**
- * Composes and sends a loan reminder through Gmail SMTP.
- * @param {FirebaseFirestore.Firestore} db Firestore instance.
- * @param {Loan} loan Loan data to use in the message.
- * @return {Promise<void>} Resolves after SMTP accepts the message.
+ * Compõe e envia um lembrete de empréstimo via SMTP do Gmail
+ * @param {FirebaseFirestore.Firestore} db Instância do Firestore
+ * @param {Loan} loan Dados do empréstimo para compor a mensagem
+ * @return {Promise<void>} Resolve após o SMTP aceitar a mensagem
  */
 async function deliverReminder(
   db: FirebaseFirestore.Firestore,
@@ -233,7 +344,7 @@ async function deliverReminder(
     sender = smtpUser.value().trim();
     appPassword = smtpAppPassword.value().replace(/\s/g, "");
   } catch (error) {
-    logger.error("SMTP secrets are unavailable", {
+    logger.error("Segredos SMTP indisponíveis", {
       errorCode: getErrorCode(error),
     });
     throw new HttpsError(
@@ -263,11 +374,11 @@ async function deliverReminder(
 }
 
 /**
- * Returns an ISO calendar date in Sao Paulo after the specified day offset.
- * @param {number} daysFromToday Number of days to add.
- * @return {string} ISO date in YYYY-MM-DD format.
+ * Retorna uma data ISO no fuso de São Paulo após o deslocamento em dias
+ * @param {number} daysFromToday Número de dias a somar
+ * @return {string} Data no format AAAA-MM-DD
  */
-function dateInSaoPaulo(daysFromToday: number): string {
+export function dateInSaoPaulo(daysFromToday: number): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Sao_Paulo",
     year: "numeric",
@@ -285,14 +396,14 @@ function dateInSaoPaulo(daysFromToday: number): string {
 }
 
 /**
- * Converts SMTP errors to safe, actionable callable errors.
- * @param {unknown} error Error returned by Nodemailer.
- * @return {HttpsError} Error suitable for the callable client.
+ * Converte erros SMTP em erros callable seguros e acionáveis
+ * @param {unknown} error Erro retornado pelo Nodemailer
+ * @return {HttpsError} Erro adequado para o cliente callable
  */
 function mapEmailError(error: unknown): HttpsError {
   const errorCode = getErrorCode(error);
   const responseCode = getResponseCode(error);
-  logger.error("Failed to send loan reminder email", {errorCode, responseCode});
+  logger.error("Falha ao enviar e-mail de lembrete", {errorCode, responseCode});
 
   if (errorCode === "EAUTH" || responseCode === 534 || responseCode === 535) {
     return new HttpsError(
@@ -316,9 +427,9 @@ function mapEmailError(error: unknown): HttpsError {
 }
 
 /**
- * Safely extracts a Nodemailer error code without logging credentials.
- * @param {unknown} error SMTP error to inspect.
- * @return {string | undefined} Error code when available.
+ * Extrai o código de erro do Nodemailer sem expor credenciais
+ * @param {unknown} error Erro SMTP a inspecionar
+ * @return {string | undefined} Código do erro quando disponível
  */
 function getErrorCode(error: unknown): string | undefined {
   if (typeof error !== "object" || error === null || !("code" in error)) {
@@ -330,9 +441,9 @@ function getErrorCode(error: unknown): string | undefined {
 }
 
 /**
- * Safely extracts an SMTP response code for actionable error handling.
- * @param {unknown} error SMTP error to inspect.
- * @return {number | undefined} Response code when available.
+ * Extrai o código de resposta SMTP para tratamento de erro
+ * @param {unknown} error Erro SMTP a inspecionar
+ * @return {number | undefined} Código de resposta quando disponível
  */
 function getResponseCode(error: unknown): number | undefined {
   if (

@@ -3,13 +3,17 @@ import { today, fmt, fmtDataHora, ativo, itemLivre, itemNome, uid, lembretes, qu
 import { uploadProductPhoto } from '../services/imageService.js'
 import { confirmLoanStatus, deleteProduct, saveProduct } from '../services/dataService.js'
 
-// Organiza o painel administrativo em quatro áreas navegáveis.
+// Organiza o painel administrativo em quatro áreas 
 export default function Admin(props) {
   const [tab, setTab] = useState('painel')
   const [, tick] = useState(0)
 
-  // reavalia os lembretes a cada minuto
+  // reavalia os lembretes a cada minut
   useEffect(() => { const t = setInterval(() => tick(n => n + 1), 60000); return () => clearInterval(t) }, [])
+  // pede permissão de notificação automaticamente se ainda não decidida
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission()
+  }, [])
   // notificação do navegador (uma vez por dia)
   useEffect(() => {
     const n = lembretes(props.db), k = 'avisado_' + today()
@@ -33,12 +37,12 @@ export default function Admin(props) {
   )
 }
 
-// Reúne a validação de códigos, os lembretes e a tabela geral de empréstimos.
+//validação de códigos, os lembretes e a tabela geral de empréstimos
 function Painel({ db, update, toast }) {
   const [cod, setCod] = useState('')
   const lem = lembretes(db)
 
-  // Avança o empréstimo da reserva para retirada ou da retirada para devolução.
+  // Avança o empréstimo da reserva para retirada ou da retirada para devolução
   async function validar() {
     const codigo = cod.trim().toUpperCase()
     const l = db.loans.find(x => ativo(x) && (x.codigo === codigo || x.codigoEntrega === codigo || (!x.codigoEntrega && x.codigo === codigo)))
@@ -68,7 +72,7 @@ function Painel({ db, update, toast }) {
       toast(`Não foi possível confirmar a validação no Firestore: ${error.message}`)
     }
   }
-  // Cancela uma reserva sem apagar o histórico do empréstimo.
+  // Cancela uma reserva sem apagar o histórico do empréstimo
   const cancelar = id => update(d => { d.loans.find(x => x.id === id).status = 'cancelado' })
 
   return (
@@ -81,9 +85,9 @@ function Painel({ db, update, toast }) {
               <span>{l.nome} · {itemNome(db, l.itemId)} · {quando(l.dias)}</span>
               {String(l.contato || '').includes('@')
                 ? (
-                  <button className="btn btn-sm btn-dark" onClick={() => window.open(linkEmail(db, l, new Date()), '_blank', 'noopener,noreferrer')}>
-                    Abrir no Gmail
-                  </button>
+                  <a className="btn btn-sm btn-dark" href={linkEmail(db, l, new Date())}>
+                    Enviar e-mail
+                  </a>
                 )
                 : (
                   <a className="btn btn-sm btn-dark" target="_blank" rel="noopener noreferrer" href={linkContato(db, l)}>
@@ -125,8 +129,8 @@ function Painel({ db, update, toast }) {
   )
 }
 
-// Permite ao administrador cadastrar e remover produtos do catálogo compartilhado.
-// Lets administrators create products with an optional camera photo.
+// Permite ao administrador cadastrar e remover produtos do catálogo compartilhado
+// Permite ao administrador cadastrar produtos com foto opcional pela câmera
 function Produtos({ db, toast }) {
   const [nome, setNome] = useState('')
   const [desc, setDesc] = useState('')
@@ -138,7 +142,7 @@ function Produtos({ db, toast }) {
   const [uploadStatus, setUploadStatus] = useState('')
   const [uploadError, setUploadError] = useState('')
 
-  // Creates a local preview and releases its temporary URL when the selection changes.
+  // Cria uma prévia local e libera a URL temporária quando a seleção muda
   useEffect(() => {
     if (!photoFile) {
       setPhotoPreview('')
@@ -149,7 +153,7 @@ function Produtos({ db, toast }) {
     return () => URL.revokeObjectURL(preview)
   }, [photoFile])
 
-  // Uploads the optional photo before saving the product document.
+  // Envia a foto opcional antes de salvar o documento do produto
   async function add(event) {
     event.preventDefault()
     if (!nome.trim()) return toast('Informe o nome do produto.')
@@ -188,7 +192,7 @@ function Produtos({ db, toast }) {
     }
   }
 
-  // Prevents deletion while a product is tied to an active loan.
+  // Impede a exclusão enquanto o produto estiver vinculado a um empréstimo ativ
   async function remove(id) {
     if (!itemLivre(db, id)) return toast('Não é possível remover um produto com empréstimo em andamento.')
     if (!window.confirm('Remover este produto?')) return
@@ -277,16 +281,16 @@ function Produtos({ db, toast }) {
     </>
   )
 }
-// Lista os perfis e explica como promover um administrador usando o Firebase Console.
+// Lista os perfis e explica como promove r um administrador usando o Firebase Console
 function Usuarios({ db, toast }) {
   const [, tick] = useState(0)
 
   useEffect(() => {
-    const timer = setInterval(() => tick(value => value + 1), 1000)
+    const timer = setInterval(() => tick(value => value + 1), 60000)
     return () => clearInterval(timer)
   }, [])
 
-  // Copia o UID para facilitar a localização do perfil no Firebase Console.
+  // Copia o UID para facilitar a localização do perfil no Firebase
   async function copiarUid(uid) {
     try {
       await navigator.clipboard.writeText(uid)
@@ -373,13 +377,13 @@ function Usuarios({ db, toast }) {
     </>
   )
 }
-// Gerencia os prazos globais e a permissão de notificações deste navegador.
+// Gerencia os prazos globais e a permissão de notificações deste navegadoe
 function Config({ db, update, toast }) {
   const [dias, setDias] = useState(db.cfg.diasAviso)
   const [max, setMax] = useState(db.cfg.maxDias)
   const [perm, setPerm] = useState('Notification' in window ? Notification.permission : 'indisponível')
 
-  // Valida as preferências e grava os novos valores compartilhados no Firestore.
+  // Valida as preferências e salva os novos valores compartilhados
   function salvar() {
     const aviso = Number.parseInt(dias, 10)
     const prazo = Number.parseInt(max, 10)
@@ -393,7 +397,7 @@ function Config({ db, update, toast }) {
     toast('Configurações salvas.')
   }
 
-  // Solicita ao navegador a permissão para mostrar lembretes locais.
+  // Solicita ao navegador a permissão para mostrar lembretes locais
   function ativarNotificacoes() {
     Notification.requestPermission().then(setPerm)
   }

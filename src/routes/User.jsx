@@ -1,35 +1,34 @@
 import { useEffect, useState } from 'react'
-import { today, addDays, diff, fmt, fmtDataHora, ativo, itemLivre, itemNome, gerarCodigo, uid, normContato, quando, Status, tempoEmprestimo, tempoRestante } from '../utils/lib.jsx'
+import { today, addDays, diff, fmt, fmtDataHora, ativo, itemLivre, itemNome, normContato, quando, Status, tempoEmprestimo, tempoRestante } from '../utils/lib.jsx'
+import { createLoan } from '../services/dataService.js'
 
 // Formulário que permite escolher um produto e registrar um pedido de empréstimo.
-export function Pedir({ db, update, toast, user }) {
+export function Pedir({ db, toast, user }) {
   const [sel, setSel] = useState(null)
   const [data, setData] = useState('')
   const [criado, setCriado] = useState(null)
+  const [enviando, setEnviando] = useState(false)
 
-  // Valida disponibilidade e prazo antes de criar o pedido no Firestore.
-  function pedir() {
+  // Valida disponibilidade e prazo antes de criar o pedido
+  async function pedir() {
     if (!sel) return toast('Escolha um produto.')
     if (!data) return toast('Escolha a data de devolução.')
     if (data <= today() || diff(data) > db.cfg.maxDias) return toast('Data fora do período permitido.')
     if (!itemLivre(db, sel)) return toast('Este produto acabou de ser emprestado.')
 
-    const codigoRetirada = gerarCodigo(db)
-    const codigoEntrega = gerarCodigo(db, [codigoRetirada])
-    const l = {
-      id: uid(),
-      itemId: sel,
-      userId: user.id,
-      nome: user.nome,
-      contato: user.contato,
-      devolucao: data,
-      codigo: codigoRetirada,
-      codigoEntrega,
-      status: 'reservado',
-      criado: today(),
+    setEnviando(true)
+    try {
+      const result = await createLoan(sel, data)
+      setCriado({ itemId: sel, devolucao: data, codigo: result.codigo, codigoEntrega: result.codigoEntrega })
+      setSel(null); setData('')
+    } catch (error) {
+      const msg = error.code === 'functions/already-exists'
+        ? 'Este produto já possui um empréstimo ativo.'
+        : error.message || 'Não foi possível registrar o empréstimo.'
+      toast(msg)
+    } finally {
+      setEnviando(false)
     }
-    update(d => { d.loans.push(l) })
-    setCriado(l); setSel(null); setData('')
   }
 
   if (criado) return (
@@ -81,7 +80,7 @@ export function Pedir({ db, update, toast, user }) {
           <input type="date" className="form-control" value={data} onChange={e => setData(e.target.value)} min={addDays(1)} max={addDays(db.cfg.maxDias)} />
           <div className="form-text">Máximo de {db.cfg.maxDias} dias.</div>
         </div>
-        <button className="btn btn-dark mt-3" data-tooltip="Enviar seu pedido para registro" onClick={pedir}>Confirmar empréstimo</button>
+        <button className="btn btn-dark mt-3" data-tooltip="Enviar seu pedido para registro" onClick={pedir} disabled={enviando}>{enviando ? 'Registrando...' : 'Confirmar empréstimo'}</button>
       </div></div>
     </>
   )

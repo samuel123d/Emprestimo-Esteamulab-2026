@@ -9,7 +9,8 @@ import {
   updateDoc,
   where,
 } from 'firebase/firestore'
-import { firestore } from './firebase.js'
+import { httpsCallable } from 'firebase/functions'
+import { firestore, functions } from './firebase.js'
 
 // Converte uma coleção de documentos em objetos que mantêm o ID usado pela interface.
 function subscribeCollection(name, onData, onError, constraints = []) {
@@ -26,7 +27,7 @@ export function subscribeToAppData({ uid, isAdmin, onChange, onError }) {
   const stop = []
 
   stop.push(subscribeCollection('items', value => { state.items = value; publish() }, onError))
-  const loanFilter = isAdmin ? [] : [where('userId', '==', uid)]
+  const loanFilter = isAdmin ? [] : [where('userId', '==', uid), where('status', 'in', ['reservado', 'emprestado'])]
   stop.push(subscribeCollection('loans', value => { state.loans = value; publish() }, onError, loanFilter))
 
   if (isAdmin) stop.push(subscribeCollection('users', value => {
@@ -42,6 +43,13 @@ export function subscribeToAppData({ uid, isAdmin, onChange, onError }) {
 
   // Para todas as inscrições, devolve um único cancelador.
   return () => stop.forEach(unsubscribe => unsubscribe())
+}
+
+// Cria um empréstimo, assim garanteimos validação server-side
+const createLoanFn = httpsCallable(functions, 'createLoan')
+export async function createLoan(itemId, devolucao) {
+  const result = await createLoanFn({ itemId, devolucao })
+  return result.data
 }
 
 // Persiste um produto antes de confirmar o cadastro na interface.

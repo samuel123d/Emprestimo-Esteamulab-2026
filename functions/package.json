@@ -8,7 +8,9 @@
     "shell": "npm run build && firebase functions:shell",
     "start": "npm run shell",
     "deploy": "firebase deploy --only functions",
-    "logs": "firebase functions:log"
+    "logs": "firebase functions:log",
+    "test": "vitest run",
+    "test:e2e": "firebase emulators:exec --only auth,firestore,functions \"npx vitest run --config vitest.e2e.config.ts\""
   },
   "engines": {
     "node": "24"
@@ -26,8 +28,10 @@
     "eslint": "^8.57.0",
     "eslint-config-google": "^0.14.0",
     "eslint-plugin-import": "^2.25.4",
+    "firebase": "^13.0.0",
     "firebase-functions-test": "^3.4.1",
-    "typescript": "^6.0.0"
+    "typescript": "^6.0.0",
+    "vitest": "^5.0.4"
   },
   "private": true
 }
