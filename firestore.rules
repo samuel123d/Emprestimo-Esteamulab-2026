@@ -2,19 +2,16 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Exige uma sessão autenticada antes de consultar dados do aplicativo
     function signedIn() {
       return request.auth != null;
     }
 
-    // O papel de administrador vem do perfil controlado no Firebase Console
     function isAdmin() {
       return signedIn()
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
 
-    // Usuários só podem criar o próprio perfil comum; nenhum cliente pode trocar papéis.
     match /users/{userId} {
       allow read: if isAdmin() || (signedIn() && request.auth.uid == userId);
       allow create: if signedIn()
@@ -27,11 +24,9 @@ service cloud.firestore {
         && request.resource.data.role == resource.data.role
         && request.resource.data.email == resource.data.email
         && request.resource.data.keys().hasOnly(['name', 'email', 'role', 'createdAt']);
-      // Contas e papéis são administrados pelo Firebase Console, não pelo navegador.
       allow delete: if false;
     }
 
-    // Produtos podem ser vistos por usuários autenticados e alterados por administradores
     match /items/{itemId} {
       allow read: if signedIn();
       allow create, update: if isAdmin()
@@ -39,16 +34,89 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // Empréstimos são criados exclusivamente pela Cloud Function createLoan (admin SDK)
-    // Leitura e alterações de status continuam com as mesmas regras.
     match /loans/{loanId} {
       allow read: if isAdmin() || (signedIn() && resource.data.userId == request.auth.uid);
-      allow create: if false;
-      allow update: if isAdmin();
+      allow create: if signedIn()
+        && request.resource.data.keys().hasAll([
+          'itemId', 'userId', 'nome', 'contato', 'inicio', 'devolucao',
+          'codigo', 'codigoEntrega', 'status', 'criado'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'itemId', 'userId', 'nome', 'contato', 'inicio', 'devolucao',
+          'codigo', 'codigoEntrega', 'status', 'criado'
+        ])
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.status == 'reservado'
+        && request.resource.data.itemId is string
+        && request.resource.data.itemId.size() > 0
+        && request.resource.data.itemId.size() <= 128
+        && exists(/databases/$(database)/documents/items/$(request.resource.data.itemId))
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'user'
+        && request.resource.data.nome == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.name
+        && request.resource.data.contato == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.email
+        && request.resource.data.inicio is string
+        && request.resource.data.inicio.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && request.resource.data.devolucao is string
+        && request.resource.data.devolucao.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && request.resource.data.inicio < request.resource.data.devolucao
+        && request.resource.data.codigo is string
+        && request.resource.data.codigo.matches('^[A-HJ-NP-Z2-9]{6}$')
+        && request.resource.data.codigoEntrega is string
+        && request.resource.data.codigoEntrega.matches('^[A-HJ-NP-Z2-9]{6}$')
+        && request.resource.data.codigo != request.resource.data.codigoEntrega
+        && request.resource.data.criado is string
+        && request.resource.data.criado.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && getAfter(/databases/$(database)/documents/itemAvailability/$(request.resource.data.itemId)).data.periods
+          .hasAny([{
+            'loanId': loanId,
+            'inicio': request.resource.data.inicio,
+            'devolucao': request.resource.data.devolucao,
+            'status': 'reservado'
+          }]);
+      allow update, delete: if isAdmin();
+    }
+
+    match /itemAvailability/{itemId} {
+      allow read: if signedIn();
+      allow create: if isAdmin()
+          && request.resource.data.keys().hasOnly(['periods', 'updatedAt'])
+          && request.resource.data.periods is list
+          && request.resource.data.periods.size() <= 500
+        || (signedIn()
+          && request.resource.data.keys().hasOnly(['periods', 'updatedAt'])
+          && request.resource.data.periods is list
+          && request.resource.data.periods.size() == 1
+          && request.resource.data.periods.hasAny([{
+            'loanId': request.resource.data.periods[0].loanId,
+            'inicio': request.resource.data.periods[0].inicio,
+            'devolucao': request.resource.data.periods[0].devolucao,
+            'status': 'reservado'
+          }])
+          && getAfter(/databases/$(database)/documents/loans/$(request.resource.data.periods[0].loanId)).data.itemId == itemId
+          && getAfter(/databases/$(database)/documents/loans/$(request.resource.data.periods[0].loanId)).data.inicio == request.resource.data.periods[0].inicio
+          && getAfter(/databases/$(database)/documents/loans/$(request.resource.data.periods[0].loanId)).data.devolucao == request.resource.data.periods[0].devolucao);
+      allow update: if isAdmin()
+        || (signedIn()
+          && request.resource.data.keys().hasOnly(['periods', 'updatedAt'])
+          && request.resource.data.periods is list
+          && request.resource.data.periods.size() == resource.data.periods.size() + 1
+          && request.resource.data.periods.hasAll(resource.data.periods)
+          && (resource.data.periods.size() == 0
+            || request.resource.data.periods[request.resource.data.periods.size() - 1].inicio
+              > resource.data.periods[resource.data.periods.size() - 1].devolucao)
+          && request.resource.data.periods.hasAny([{
+            'loanId': request.resource.data.periods[request.resource.data.periods.size() - 1].loanId,
+            'inicio': request.resource.data.periods[request.resource.data.periods.size() - 1].inicio,
+            'devolucao': request.resource.data.periods[request.resource.data.periods.size() - 1].devolucao,
+            'status': 'reservado'
+          }])
+          && getAfter(/databases/$(database)/documents/loans/$(request.resource.data.periods[request.resource.data.periods.size() - 1].loanId)).data.itemId == itemId
+          && getAfter(/databases/$(database)/documents/loans/$(request.resource.data.periods[request.resource.data.periods.size() - 1].loanId)).data.inicio == request.resource.data.periods[request.resource.data.periods.size() - 1].inicio
+          && getAfter(/databases/$(database)/documents/loans/$(request.resource.data.periods[request.resource.data.periods.size() - 1].loanId)).data.devolucao == request.resource.data.periods[request.resource.data.periods.size() - 1].devolucao);
       allow delete: if isAdmin();
     }
 
-    // Configurações globais só podem ser alteradas por administradores
     match /settings/{settingId} {
       allow read: if signedIn();
       allow write: if isAdmin() && settingId == 'app';

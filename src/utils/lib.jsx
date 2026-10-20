@@ -16,11 +16,34 @@ export const addDays = days => {
   return ymd(date)
 }
 
+// Calcula uma data futura a partir de outra data no formato AAAA-MM-DD.
+export const addDaysTo = (value, days) => {
+  const date = new Date(`${value}T00:00:00`)
+  date.setDate(date.getDate() + days)
+  return ymd(date)
+}
+
 // Mede a diferença em dias entre hoje e uma data de devolução.
 export const diff = date => Math.round((new Date(`${date}T00:00`) - new Date(`${today()}T00:00`)) / 864e5)
 
+// Mede dias entre duas datas sem envolver o fuso horário local.
+export const diffFrom = (start, end) => Math.round(
+  (Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 864e5,
+)
+
 // Converte AAAA-MM-DD para o formato brasileiro DD/MM/AAAA.
 export const fmt = date => (date ? date.split('-').reverse().join('/') : '')
+
+// Compara texto de busca ignorando diferenças entre maiúsculas e acentos.
+export const normalizarBusca = value => String(value ?? '')
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .toLocaleLowerCase('pt-BR')
+
+export const correspondeBusca = (termo, ...valores) => {
+  const busca = normalizarBusca(termo).trim()
+  return !busca || valores.some(valor => normalizarBusca(valor).includes(busca))
+}
 
 // Converte valores de data em objetos Date, aceitando YYYY-MM-DD e timestamps do Firebase.
 export function paraData(value) {
@@ -88,8 +111,38 @@ export function tempoRestante(devolucao, agora = new Date()) {
 // Indica se o empréstimo ainda está reservado ou com o produto emprestado.
 export const ativo = loan => loan.status === 'reservado' || loan.status === 'emprestado'
 
-// Confere se não existe empréstimo ativo para o produto informado.
-export const itemLivre = (db, itemId) => !db.loans.some(loan => loan.itemId === itemId && ativo(loan))
+// Retorna os períodos públicos, sem dados pessoais ou códigos dos empréstimos.
+export function periodosItem(db, itemId) {
+  const availability = db.availability?.find(item => item.id === itemId)
+  if (availability) return [...(availability.periods || [])]
+    .sort((left, right) => left.inicio.localeCompare(right.inicio))
+  return db.loans
+    .filter(loan => loan.itemId === itemId && ativo(loan))
+    .map(loan => ({
+      inicio: loan.inicio || loan.criado || today(),
+      devolucao: loan.devolucao,
+      status: loan.status,
+    }))
+}
+
+// Retorna a reserva ou o empréstimo que cobre a data consultada.
+export const periodoAtualItem = (db, itemId, date = today()) => periodosItem(db, itemId)
+  .find(period => period.inicio <= date && period.devolucao >= date)
+
+// Permite reservar a partir do primeiro dia após todos os períodos já agendados.
+export function inicioDisponivelItem(db, itemId) {
+  const futurePeriods = periodosItem(db, itemId)
+    .filter(period => period.devolucao >= today())
+  if (futurePeriods.length === 0) return today()
+  const lastReturn = futurePeriods.reduce(
+    (latest, period) => period.devolucao > latest ? period.devolucao : latest,
+    futurePeriods[0].devolucao,
+  )
+  return addDaysTo(lastReturn, 1)
+}
+
+// Confere se o produto não tem empréstimo nem reserva futura ativa.
+export const itemLivre = (db, itemId) => periodosItem(db, itemId).length === 0
 
 // Procura o nome do produto associado a um empréstimo.
 export const itemNome = (db, itemId) => db.items.find(item => item.id === itemId)?.nome ?? '(removido)'

@@ -13,6 +13,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@vercel/analytics": "^2.0.1",
     "bootstrap": "^5.3.3",
     "firebase": "^12.12.1",
     "react": "^18.3.1",

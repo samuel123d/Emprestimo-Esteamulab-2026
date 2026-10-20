@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
-import { today, fmt, fmtDataHora, ativo, itemLivre, itemNome, uid, lembretes, quando, linkContato, linkEmail, Status, tempoEmprestimo } from '../utils/lib.jsx'
+import { today, fmt, fmtDataHora, ativo, itemLivre, itemNome, uid, lembretes, quando, linkContato, linkEmail, Status, tempoEmprestimo, correspondeBusca } from '../utils/lib.jsx'
 import { uploadProductPhoto } from '../services/imageService.js'
 import { confirmLoanStatus, deleteProduct, saveProduct } from '../services/dataService.js'
+import SearchBar from '../components/SearchBar.jsx'
+import LoadingState from '../components/LoadingState.jsx'
 
 // Organiza o painel administrativo em quatro áreas 
 export default function Admin(props) {
@@ -40,7 +42,24 @@ export default function Admin(props) {
 //validação de códigos, os lembretes e a tabela geral de empréstimos
 function Painel({ db, update, toast }) {
   const [cod, setCod] = useState('')
-  const lem = lembretes(db)
+  const [searchTerm, setSearchTerm] = useState('')
+  const lem = lembretes(db).filter(loan =>
+    correspondeBusca(searchTerm, loan.nome, loan.contato, itemNome(db, loan.itemId), loan.status),
+  )
+  const filteredLoans = [...db.loans].reverse().filter(loan =>
+    correspondeBusca(
+      searchTerm,
+      itemNome(db, loan.itemId),
+      loan.nome,
+      loan.contato,
+      loan.criado,
+      loan.inicio,
+      loan.devolucao,
+      loan.status,
+      loan.codigo,
+      loan.codigoEntrega,
+    ),
+  )
 
   // Avança o empréstimo da reserva para retirada ou da retirada para devolução
   async function validar() {
@@ -52,6 +71,14 @@ function Painel({ db, update, toast }) {
     const isRetirada = l.status === 'reservado' && l.codigo === codigo
     const isEntrega = l.status === 'emprestado' && (l.codigoEntrega === codigo || (!l.codigoEntrega && l.codigo === codigo))
     if (!isRetirada && !isEntrega) return toast('Código não corresponde ao passo atual do empréstimo.')
+    if (isRetirada && db.loans.some(loan =>
+      loan.id !== l.id && loan.itemId === l.itemId && loan.status === 'emprestado'
+    )) {
+      return toast('Não é possível retirar: este produto já está emprestado.')
+    }
+    if (isRetirada && l.inicio && l.inicio > today()) {
+      return toast(`A retirada deste produto só poderá acontecer a partir de ${fmt(l.inicio)}.`)
+    }
 
     try {
       await confirmLoanStatus(
@@ -63,6 +90,9 @@ function Painel({ db, update, toast }) {
       toast(isRetirada ? `Retirada confirmada: ${nome} com ${l.nome}.` : `Devolução confirmada: ${nome}.`)
       setCod('')
     } catch (error) {
+      if (error.code === 'item-already-loaned') {
+        return toast('Não é possível retirar: este produto já está emprestado.')
+      }
       if (error.code === 'permission-denied') {
         return toast('O Firestore negou a validação. Publique as regras de firestore.rules e confirme que seu perfil está como admin.')
       }
@@ -77,6 +107,24 @@ function Painel({ db, update, toast }) {
 
   return (
     <>
+      <SearchBar
+        id="admin-loan-search"
+        value={searchTerm}
+        onChange={setSearchTerm}
+        placeholder="Buscar empréstimo por produto, usuário, data ou código..."
+        suggestions={db.loans.flatMap(loan => [
+          itemNome(db, loan.itemId),
+          loan.nome,
+          loan.contato,
+          loan.status,
+          loan.criado,
+          loan.inicio,
+          loan.devolucao,
+          loan.codigo,
+          loan.codigoEntrega,
+        ])}
+      />
+      {!db.ready?.loans && <LoadingState label="Carregando empréstimos e lembretes..." />}
       {lem.length > 0 && (
         <div className="alert alert-warning">
           <strong>Lembretes de devolução ({lem.length})</strong>
@@ -107,14 +155,18 @@ function Painel({ db, update, toast }) {
       </div></form>
       <div className="card shadow-sm"><div className="card-body">
         <h6>Empréstimos</h6>
-        <div className="table-responsive"><table className="table align-middle mb-0">
-          <thead><tr><th>Produto</th><th>Usuário</th><th>Devolução</th><th>Retirada</th><th>Entrega</th><th>Status</th><th /></tr></thead>
+        {!db.ready?.loans
+          ? <LoadingState label="Carregando empréstimos..." />
+          : <div className="table-responsive"><table className="table align-middle mb-0">
+          <thead><tr><th>Produto</th><th>Usuário</th><th>Reservado em</th><th>Início</th><th>Devolução</th><th>Retirada</th><th>Entrega</th><th>Status</th><th /></tr></thead>
           <tbody>
-            {db.loans.length === 0 && <tr><td colSpan={7} className="text-muted">Nenhum empréstimo ainda.</td></tr>}
-            {[...db.loans].reverse().map(l => (
+            {filteredLoans.length === 0 && <tr><td colSpan={9} className="text-muted">{db.loans.length ? 'Nenhum empréstimo corresponde à busca.' : 'Nenhum empréstimo ainda.'}</td></tr>}
+            {filteredLoans.map(l => (
               <tr key={l.id}>
                 <td>{itemNome(db, l.itemId)}</td>
                 <td>{l.nome}<div className="small text-muted">{l.contato}</div></td>
+                <td>{fmt(l.criado) || '—'}</td>
+                <td>{fmt(l.inicio || l.criado)}</td>
                 <td>{fmt(l.devolucao)}</td>
                 <td className="fw-bold">{l.codigo}</td>
                 <td className="fw-bold">{l.codigoEntrega || l.codigo}</td>
@@ -123,7 +175,7 @@ function Painel({ db, update, toast }) {
               </tr>
             ))}
           </tbody>
-        </table></div>
+        </table></div>}
       </div></div>
     </>
   )
@@ -132,6 +184,7 @@ function Painel({ db, update, toast }) {
 // Permite ao administrador cadastrar e remover produtos do catálogo compartilhado
 // Permite ao administrador cadastrar produtos com foto opcional pela câmera
 function Produtos({ db, toast }) {
+  const [searchTerm, setSearchTerm] = useState('')
   const [nome, setNome] = useState('')
   const [desc, setDesc] = useState('')
   const [photoFile, setPhotoFile] = useState(null)
@@ -210,6 +263,17 @@ function Produtos({ db, toast }) {
 
   return (
     <>
+      <SearchBar
+        id="admin-product-search"
+        value={searchTerm}
+        onChange={setSearchTerm}
+        placeholder="Buscar produto por nome, descrição ou disponibilidade..."
+        suggestions={db.items.flatMap(item => [
+          item.nome,
+          item.desc,
+          itemLivre(db, item.id) ? 'Disponível' : 'Emprestado',
+        ])}
+      />
       <form className="card shadow-sm mb-3" onSubmit={add}>
         <div className="card-body">
           <h6>Cadastrar produto</h6>
@@ -261,8 +325,14 @@ function Produtos({ db, toast }) {
 
       <div className="card shadow-sm">
         <ul className="list-group list-group-flush">
-          {db.items.length === 0 && <li className="list-group-item text-muted">Nenhum produto cadastrado.</li>}
-          {db.items.map(item => (
+          {!db.ready?.items && <li className="list-group-item"><LoadingState label="Carregando produtos..." /></li>}
+          {db.ready?.items && db.items.length === 0 && <li className="list-group-item text-muted">Nenhum produto cadastrado.</li>}
+          {db.ready?.items && db.items.filter(item => correspondeBusca(
+            searchTerm,
+            item.nome,
+            item.desc,
+            itemLivre(db, item.id) ? 'disponível' : 'emprestado',
+          )).map(item => (
             <li key={item.id} className="list-group-item d-flex justify-content-between align-items-center gap-3">
               <span className="d-flex align-items-center">
                 {item.photoUrl && <img className="product-photo-thumb" src={item.photoUrl} alt={`Foto de ${item.nome}`} />}
@@ -276,6 +346,12 @@ function Produtos({ db, toast }) {
               </span>
             </li>
           ))}
+          {db.ready?.items && db.items.length > 0 && !db.items.some(item => correspondeBusca(
+            searchTerm,
+            item.nome,
+            item.desc,
+            itemLivre(db, item.id) ? 'disponível' : 'emprestado',
+          )) && <li className="list-group-item text-muted">Nenhum produto corresponde à busca.</li>}
         </ul>
       </div>
     </>
@@ -283,6 +359,7 @@ function Produtos({ db, toast }) {
 }
 // Lista os perfis e explica como promove r um administrador usando o Firebase Console
 function Usuarios({ db, toast }) {
+  const [searchTerm, setSearchTerm] = useState('')
   const [, tick] = useState(0)
 
   useEffect(() => {
@@ -312,6 +389,7 @@ function Usuarios({ db, toast }) {
           ...loan,
           nomeProduto: itemNome(db, loan.itemId),
           fotoProduto: produto?.photoUrl || '',
+          descProduto: produto?.desc || '',
         }
       })
       .reverse()
@@ -319,6 +397,22 @@ function Usuarios({ db, toast }) {
 
   return (
     <>
+      <SearchBar
+        id="admin-user-search"
+        value={searchTerm}
+        onChange={setSearchTerm}
+        placeholder="Buscar usuário, e-mail, produto ou empréstimo..."
+        suggestions={[
+          ...db.users.flatMap(account => [account.nome, account.contato, account.role]),
+          ...db.loans.flatMap(loan => [
+            itemNome(db, loan.itemId),
+            loan.status,
+            loan.criado,
+            loan.inicio,
+            loan.devolucao,
+          ]),
+        ]}
+      />
       <div className="alert alert-info">
         <strong>Administradores são definidos pelo Firebase.</strong>
         <ol className="mb-0 mt-2">
@@ -329,12 +423,42 @@ function Usuarios({ db, toast }) {
         <span className="small">O cadastro pelo site cria o perfil automaticamente. A promoção para administrador continua sendo feita somente no Firebase.</span>
       </div>
       <div className="card shadow-sm"><div className="card-body">
-        <h6>Contas cadastradas ({db.users.length})</h6>
-        <div className="table-responsive"><table className="table align-middle mb-0">
+        <h6>{db.ready?.users ? `Contas cadastradas (${db.users.length})` : 'Carregando contas cadastradas...'}</h6>
+        {!db.ready?.users || !db.ready?.loans || !db.ready?.items
+          ? <LoadingState label="Carregando usuários e produtos associados..." />
+          : <div className="table-responsive"><table className="table align-middle mb-0">
           <thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Produtos</th><th>UID</th></tr></thead>
           <tbody>
-            {db.users.map(account => {
+            {db.users.filter(account => {
+              const loans = produtosDoUsuario(account)
+              return correspondeBusca(searchTerm, account.nome, account.contato, account.id, account.role)
+                || loans.some(loan => correspondeBusca(
+                  searchTerm,
+                  loan.nomeProduto,
+                  loan.descProduto,
+                  loan.status,
+                  loan.criado,
+                  loan.inicio,
+                  loan.devolucao,
+                  loan.codigo,
+                  loan.codigoEntrega,
+                ))
+            }).map(account => {
               const produtos = produtosDoUsuario(account)
+              const accountMatches = correspondeBusca(searchTerm, account.nome, account.contato, account.id, account.role)
+              const visibleLoans = !searchTerm || accountMatches
+                ? produtos
+                : produtos.filter(loan => correspondeBusca(
+                  searchTerm,
+                  loan.nomeProduto,
+                  loan.descProduto,
+                  loan.status,
+                  loan.criado,
+                  loan.inicio,
+                  loan.devolucao,
+                  loan.codigo,
+                  loan.codigoEntrega,
+                ))
               return (
                 <tr key={account.id}>
                   <td>{account.nome}</td>
@@ -344,26 +468,30 @@ function Usuarios({ db, toast }) {
                   </span></td>
                   <td>
                     {produtos.length === 0 ? <span className="text-muted">Nenhum</span> : (
-                      <ul className="mb-0 ps-0 small" style={{ listStyle: 'none' }}>
-                        {produtos.map(loan => (
-                          <li key={loan.id} className="mb-3">
-                            <div className="d-flex align-items-center gap-2 mb-1">
-                              {loan.fotoProduto && <img className="product-photo-thumb" src={loan.fotoProduto} alt={`Foto de ${loan.nomeProduto}`} />}
-                              <span className="fw-semibold">{loan.nomeProduto}</span>
-                              <span className="text-muted">({loan.status})</span>
-                            </div>
-                            <div className="text-muted">
-                              Retirada: {loan.retirado ? fmtDataHora(loan.retirado) : '—'}
-                            </div>
-                            <div className="text-muted">
-                              Entrega: {loan.devolvidoEm ? fmtDataHora(loan.devolvidoEm) : '—'}
-                            </div>
-                            <div className="text-muted">
-                              Tempo: {tempoEmprestimo(loan.retirado, loan.devolvidoEm || (loan.status === 'emprestado' ? new Date() : null))}
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
+                      <details className="user-loans-details">
+                        <summary>{visibleLoans.length} produto(s) — abrir detalhes</summary>
+                        <ul className="mb-0 mt-2 ps-0 small" style={{ listStyle: 'none' }}>
+                          {visibleLoans.map(loan => (
+                            <li key={loan.id} className="user-loan-detail border rounded p-2 mb-2">
+                              <div className="d-flex align-items-center gap-2 mb-2">
+                                {loan.fotoProduto && <img className="product-photo-thumb" src={loan.fotoProduto} alt={`Foto de ${loan.nomeProduto}`} />}
+                                <div>
+                                  <div className="fw-semibold">{loan.nomeProduto}</div>
+                                  {loan.descProduto && <div className="text-muted">{loan.descProduto}</div>}
+                                </div>
+                                <Status s={loan.status} />
+                              </div>
+                              <div className="text-muted">Reservado em: {fmt(loan.criado) || '—'}</div>
+                              <div className="text-muted">Período: {fmt(loan.inicio || loan.criado)} a {fmt(loan.devolucao)}</div>
+                              <div className="text-muted">Retirada: {loan.retirado ? fmtDataHora(loan.retirado) : '—'}</div>
+                              <div className="text-muted">Entrega: {loan.devolvidoEm ? fmtDataHora(loan.devolvidoEm) : '—'}</div>
+                              <div className="text-muted">
+                                Tempo: {tempoEmprestimo(loan.retirado, loan.devolvidoEm || (loan.status === 'emprestado' ? new Date() : null))}
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
                     )}
                   </td>
                   <td><button className="btn btn-sm btn-outline-secondary" onClick={() => copiarUid(account.id)}>Copiar UID</button></td>
@@ -371,8 +499,13 @@ function Usuarios({ db, toast }) {
               )
             })}
             {db.users.length === 0 && <tr><td colSpan={5} className="text-muted">Nenhuma conta carregada.</td></tr>}
+            {db.users.length > 0 && !db.users.some(account => {
+              const loans = produtosDoUsuario(account)
+              return correspondeBusca(searchTerm, account.nome, account.contato, account.id, account.role)
+                || loans.some(loan => correspondeBusca(searchTerm, loan.nomeProduto, loan.descProduto, loan.status, loan.criado, loan.inicio, loan.devolucao, loan.codigo, loan.codigoEntrega))
+            }) && <tr><td colSpan={5} className="text-muted">Nenhum usuário ou produto corresponde à busca.</td></tr>}
           </tbody>
-        </table></div>
+        </table></div>}
       </div></div>
     </>
   )
@@ -427,4 +560,3 @@ function Config({ db, update, toast }) {
     </div></div>
   )
 }
-

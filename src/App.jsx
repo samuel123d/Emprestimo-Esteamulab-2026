@@ -1,9 +1,10 @@
 // Componente principal: controla sessão, perfil, dados compartilhados e telas.
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Analytics } from '@vercel/analytics/react'
 import { doc, onSnapshot } from 'firebase/firestore'
 import { firestore } from './services/firebase.js'
 import { ensureUserProfile, logoutUser, watchAuth } from './services/authService.js'
-import { persistDbChanges, subscribeToAppData } from './services/dataService.js'
+import { persistDbChanges, subscribeToAppData, syncItemAvailability } from './services/dataService.js'
 import Auth from './routes/Auth.jsx'
 import Admin from './routes/Admin.jsx'
 import { Meus, Pedir } from './routes/User.jsx'
@@ -11,7 +12,31 @@ import Navbar from './components/Navbar.jsx'
 import Footer from './components/Footer.jsx'
 
 // Valores iniciais exibidos enquanto as coleções do Firestore carregam.
-const EMPTY_DB = { items: [], loans: [], users: [], cfg: { diasAviso: 1, maxDias: 30 } }
+const EMPTY_DB = { items: [], loans: [], availability: [], users: [], cfg: { diasAviso: 1, maxDias: 30 } }
+const UPDATES_VERSION = '2026-10-20-role-updates'
+const ROLE_UPDATES = {
+  user: {
+    title: 'Novidades para usuários',
+    items: [
+      'No catálogo, você pode ver se um produto está disponível, emprestado ou reservado, além da previsão de retorno.',
+      'Você pode reservar um período futuro após a data de retorno prevista do produto.',
+      'A busca de produtos tem sugestões abaixo do campo e procura somente pelo nome do produto.',
+      'Em “Meus empréstimos”, você pode buscar seus registros e consultar a data em que cada reserva foi feita.',
+      'O catálogo e seu histórico mostram indicadores enquanto os dados estão carregando.',
+    ],
+  },
+  admin: {
+    title: 'Novidades para administradores',
+    items: [
+      'A busca do Painel filtra empréstimos e lembretes por produto, usuário, datas, status ou código.',
+      'Na área Produtos, a busca filtra por nome, descrição e disponibilidade.',
+      'Na aba Usuários, a busca encontra contas e empréstimos; os detalhes dos produtos agora podem ser expandidos ou recolhidos.',
+      'O painel bloqueia a confirmação de retirada se o produto já estiver emprestado, inclusive em validações concorrentes.',
+      'O painel mostra indicadores de carregamento para empréstimos, produtos e dados de usuários.',
+      'As reservas futuras são registradas no Firestore e a disponibilidade compartilhada é sincronizada pelo painel.',
+    ],
+  },
+}
 
 export default function App() {
   const [authUser, setAuthUser] = useState(null)
@@ -23,10 +48,10 @@ export default function App() {
   const [repairingProfile, setRepairingProfile] = useState(false)
   const [profileIssue, setProfileIssue] = useState(null)
   const [creatorEgg, setCreatorEgg] = useState(false)
+  const [showUpdates, setShowUpdates] = useState(false)
   const dbRef = useRef(EMPTY_DB)
+  const syncedLoansRef = useRef('')
   const toastTimerRef = useRef(null)
-  const creatorClicksRef = useRef(0)
-  const creatorClickTimerRef = useRef(null)
 
   // Acompanha login e logout feitos pelo Firebase Authentication.
   useEffect(() => watchAuth(user => {
@@ -68,23 +93,52 @@ export default function App() {
     })
   }, [authUser])
 
+  // Exibe cada comunicado uma vez por conta e por navegador.
+  useEffect(() => {
+    if (!profile) {
+      setShowUpdates(false)
+      return
+    }
+    const key = `esteamulab-updates-${UPDATES_VERSION}-${profile.role}-${profile.id}`
+    try {
+      setShowUpdates(localStorage.getItem(key) !== 'seen')
+    } catch (error) {
+      setMessage(`Não foi possível verificar as novidades já exibidas: ${error.message}`)
+      setShowUpdates(true)
+    }
+  }, [profile])
+
   // Assina apenas os dados permitidos para o papel atual e recebe atualizações em tempo real.
   useEffect(() => {
     if (!authUser || !profile) return undefined
     setLoading(true)
-    return subscribeToAppData({
+    const unsubscribe = subscribeToAppData({
       uid: authUser.uid,
       isAdmin: profile.role === 'admin',
       onChange: next => {
         dbRef.current = next
         setDb(next)
         setLoading(false)
+        if (profile.role === 'admin' && next.ready.all) {
+          const serializedLoans = JSON.stringify([next.items, next.loans])
+          if (serializedLoans !== syncedLoansRef.current) {
+            syncedLoansRef.current = serializedLoans
+            syncItemAvailability(next.loans, next.items).catch(error => {
+              syncedLoansRef.current = ''
+              setMessage(`Não foi possível sincronizar a disponibilidade: ${error.message}`)
+            })
+          }
+        }
       },
       onError: error => {
-        setMessage(`Erro ao sincronizar dados: ${error.message}`)
+        const permissionDenied = error.cause?.code === 'permission-denied'
+        setMessage(permissionDenied
+          ? `A leitura foi bloqueada em ${error.message}. Publique as regras atualizadas com: firebase deploy --only firestore:rules --project emprestimo-2026`
+          : `Erro ao sincronizar dados: ${error.message}`)
         setLoading(false)
       },
     })
+    return unsubscribe
   }, [authUser, profile])
 
   // Atualiza o estado da interface e grava somente as mudanças no Firestore.
@@ -144,33 +198,6 @@ export default function App() {
     playCreatorJingle()
   }, [])
 
-  function countCreatorClick() {
-    creatorClicksRef.current += 1
-    window.clearTimeout(creatorClickTimerRef.current)
-    if (creatorClicksRef.current >= 7) {
-      creatorClicksRef.current = 0
-      surpriseCreator()
-      return
-    }
-    creatorClickTimerRef.current = window.setTimeout(() => { creatorClicksRef.current = 0 }, 2200)
-  }
-
-  useEffect(() => {
-    const secret = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'b', 'a']
-    let position = 0
-    function checkSecret(event) {
-      if (event.target instanceof HTMLElement && (event.target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName))) return
-      const key = event.key.length === 1 ? event.key.toLowerCase() : event.key
-      position = key === secret[position] ? position + 1 : key === secret[0] ? 1 : 0
-      if (position === secret.length) {
-        position = 0
-        surpriseCreator()
-      }
-    }
-    window.addEventListener('keydown', checkSecret)
-    return () => window.removeEventListener('keydown', checkSecret)
-  }, [surpriseCreator])
-
   // Repara um perfil ausente sempre com o papel comum; o Firestore valida a criação.
   async function repairProfile() {
     if (!authUser) return
@@ -197,6 +224,17 @@ export default function App() {
     }
   }
 
+  function dismissUpdates() {
+    if (!profile) return
+    const key = `esteamulab-updates-${UPDATES_VERSION}-${profile.role}-${profile.id}`
+    try {
+      localStorage.setItem(key, 'seen')
+      setShowUpdates(false)
+    } catch (error) {
+      setMessage(`Não foi possível salvar que você já viu as novidades: ${error.message}`)
+    }
+  }
+
   // Aguarda a validação da sessão, do perfil e das permissões antes de mostrar a tela.
   if (loading) return <main className="loading-screen"><img className="loading-logo" src="/logos/esteamulab-logo.png" alt="ESTEAMULAB" /><div className="loading-spinner" /><p>Preparando suas descobertas...</p></main>
 
@@ -207,7 +245,23 @@ export default function App() {
       <Navbar profile={profile} onLogout={logoutUser} />
 
       <main className="container pb-5" style={{ maxWidth: 960 }}>
-        {!authUser && <Auth toast={toast} />}
+        {!authUser && <Auth toast={toast} onCreatorClick={surpriseCreator} />}
+        {profile && showUpdates && (
+          <section className="updates-notice mb-4" aria-labelledby="updates-title">
+            <div className="updates-heading">
+              <div>
+                <span className="updates-kicker">NOVIDADES DO ESTEAMULAB</span>
+                <h2 id="updates-title">{ROLE_UPDATES[profile.role].title}</h2>
+              </div>
+              <button className="btn btn-sm btn-outline-secondary" type="button" onClick={dismissUpdates}>
+                Entendi, fechar
+              </button>
+            </div>
+            <ul className="mb-0">
+              {ROLE_UPDATES[profile.role].items.map(item => <li key={item}>{item}</li>)}
+            </ul>
+          </section>
+        )}
         {authUser && !profile && (
           <div className="alert alert-danger">
             <p className="mb-2">
@@ -251,7 +305,8 @@ export default function App() {
         )}
       </main>
 
-      <Footer profile={profile} onCreatorClick={countCreatorClick} />
+      <Footer profile={profile} />
+      <Analytics />
 
       {creatorEgg && <div className="creator-egg-backdrop" role="presentation">
         <section className="creator-egg" role="dialog" aria-modal="true" aria-labelledby="creator-egg-title">

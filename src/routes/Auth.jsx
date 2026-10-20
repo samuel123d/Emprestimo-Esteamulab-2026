@@ -21,7 +21,7 @@ function authErrorMessage(error) {
   return messages[error.code] || 'Não foi possível concluir. Confira os dados e tente novamente.'
 }
 
-export default function Auth({ toast }) {
+export default function Auth({ toast, onCreatorClick }) {
   const [isRegistering, setIsRegistering] = useState(false)
   const [form, setForm] = useState({ name: '', email: '', password: '', confirmPassword: '' })
   const [adminForm, setAdminForm] = useState({ email: '', password: '' })
@@ -125,7 +125,14 @@ export default function Auth({ toast }) {
     <section className="auth-layout">
       <div className="auth-intro">
         <div className="auth-orbit auth-orbit-one" /><div className="auth-orbit auth-orbit-two" />
-        <img className="auth-brand-logo" src="/logos/esteamulab-logo.png" alt="ESTEAMULAB — Espaço para pensar, criar e inovar" />
+        <button
+          className="auth-logo-trigger"
+          type="button"
+          aria-label="Abrir surpresa do criador do ESTEAMULAB"
+          onClick={onCreatorClick}
+        >
+          <img className="auth-brand-logo" src="/logos/esteamulab-logo.png" alt="ESTEAMULAB — Espaço para pensar, criar e inovar" />
+        </button>
         <span className="auth-kicker">CRIAR · EXPLORAR · APRENDER</span>
         <h1>Ideias em movimento.<br /><span>Conhecimento compartilhado.</span></h1>
         <p>Um espaço para emprestar, experimentar e transformar curiosidade em novas descobertas.</p>

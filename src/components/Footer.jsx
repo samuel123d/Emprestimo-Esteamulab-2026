@@ -1,4 +1,21 @@
-export default function Footer({ profile, onCreatorClick }) {
+import { useState } from 'react'
+
+function CollaboratorAvatar() {
+  const [imageFailed, setImageFailed] = useState(false)
+  if (imageFailed) return <span className="collaborator-avatar" aria-hidden="true">BF</span>
+  return (
+    <img
+      className="collaborator-avatar collaborator-avatar-image"
+      src="https://avatars.githubusercontent.com/u/155818528?v=4"
+      alt="Foto de perfil de BrunnoFOS"
+      loading="lazy"
+      referrerPolicy="no-referrer"
+      onError={() => setImageFailed(true)}
+    />
+  )
+}
+
+export default function Footer({ profile }) {
   return (
     <>
       {profile && (
@@ -13,13 +30,29 @@ export default function Footer({ profile, onCreatorClick }) {
       )}
       <footer className="site-footer">
         <div className="creator-credit-wrap">
-          <div className="creator-credit" onClick={onCreatorClick}>
-            <img src="/creator/samuel.webp" alt="Samuel Anderson Machado Lopes, criador do site" />
-            <span><strong>Samuel Anderson Machado Lopes</strong><small>Criador do site</small></span>
-          </div>
+          <a
+            className="creator-credit collaborator-credit"
+            href="https://github.com/samuel123d"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Samuel Anderson, criador do site, no GitHub"
+          >
+            <img src="/creator/samuel.webp" alt="Foto de Samuel Anderson" />
+            <span><strong>Samuel Anderson</strong><small>Criador do site</small></span>
+          </a>
+          <a
+            className="creator-credit collaborator-credit"
+            href="https://github.com/BrunnoFOS"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Bruno Ferreira, tester do site, no GitHub"
+          >
+            <CollaboratorAvatar />
+          <span><strong>Bruno Ferreira</strong><small>Tester do site</small></span>
+          </a>
         </div>
-        <span>© {new Date().getFullYear()} ESTEAMULAB · Direitos reservados ao ESTEAMULAB e a <a href="https://samuel123d.github.io/" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'none' }}>Samuel Anderson Machado Lopes</a>.</span>
-        <span>Um espaço para pensar, criar e inovar.</span>
+        <span className="footer-copyright">© {new Date().getFullYear()} ESTEAMULAB · Direitos reservados ao <a href="https://www.instagram.com/esteamulab/" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'none' }}>ESTEAMULAB</a> e a <a className="footer-creator-trigger" href="https://samuel123d.github.io/" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'none' }}>Samuel Anderson</a>.</span>
+        <span className="footer-tagline">Um espaço para pensar, criar e inovar.</span>
       </footer>
     </>
   )

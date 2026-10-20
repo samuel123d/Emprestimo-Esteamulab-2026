@@ -1,7 +1,8 @@
-import {randomBytes, randomUUID} from "node:crypto";
+import {randomBytes, randomInt, randomUUID} from "node:crypto";
 import {initializeApp} from "firebase-admin/app";
 import {FieldValue, getFirestore, Timestamp} from "firebase-admin/firestore";
 import {logger, setGlobalOptions} from "firebase-functions";
+import {onDocumentWritten} from "firebase-functions/v2/firestore";
 import {HttpsError, onCall} from "firebase-functions/v2/https";
 import {onSchedule} from "firebase-functions/v2/scheduler";
 import {defineSecret} from "firebase-functions/params";
@@ -14,8 +15,273 @@ const smtpUser = defineSecret("SMTP_USER");
 const smtpAppPassword = defineSecret("SMTP_APP_PASSWORD");
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const staleClaimMilliseconds = 15 * 60 * 1000;
-
 const codeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+/**
+ * Creates a reservation only when its requested dates do not conflict.
+ */
+export const createLoanReservation = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Entre para reservar um produto.");
+  }
+
+  const itemId = request.data?.itemId;
+  const inicio = request.data?.inicio;
+  const devolucao = request.data?.devolucao;
+  if (
+    typeof itemId !== "string" ||
+    !/^[a-zA-Z0-9_-]{1,128}$/.test(itemId) ||
+    !isCalendarDate(inicio) ||
+    !isCalendarDate(devolucao)
+  ) {
+    throw new HttpsError("invalid-argument", "Produto ou datas inválidos.");
+  }
+
+  const db = getFirestore();
+  const [profileSnapshot, settingsSnapshot] = await Promise.all([
+    db.collection("users").doc(request.auth.uid).get(),
+    db.collection("settings").doc("app").get(),
+  ]);
+  const profile = profileSnapshot.data();
+  if (!profile || profile.role !== "user") {
+    throw new HttpsError(
+      "permission-denied",
+      "Somente usuários podem criar uma reserva.",
+    );
+  }
+
+  const maxDays = Number.isInteger(settingsSnapshot.data()?.maxDias) ?
+    Math.max(1, Math.min(settingsSnapshot.data()?.maxDias, 365)) :
+    30;
+  const duration = calendarDayDifference(inicio, devolucao);
+  if (
+    inicio < dateInSaoPaulo(0) ||
+    duration < 1 ||
+    duration > maxDays
+  ) {
+    throw new HttpsError(
+      "invalid-argument",
+      `A devolução deve ocorrer entre 1 e ${maxDays} dias após o início.`,
+    );
+  }
+
+  const itemRef = db.collection("items").doc(itemId);
+  const availabilityRef = db.collection("itemAvailability").doc(itemId);
+  const loanRef = db.collection("loans").doc();
+  const code = generateLoanCode();
+  const deliveryCode = generateLoanCode(code);
+  const loan: Loan & Record<string, string> = {
+    itemId,
+    userId: request.auth.uid,
+    nome: typeof profile.name === "string" ? profile.name : "",
+    contato: typeof profile.email === "string" ? profile.email : "",
+    inicio,
+    devolucao,
+    codigo: code,
+    codigoEntrega: deliveryCode,
+    status: "reservado",
+    criado: dateInSaoPaulo(0),
+  };
+  if (!loan.nome || !loan.contato) {
+    throw new HttpsError(
+      "failed-precondition",
+      "Seu perfil está incompleto. Atualize-o antes de reservar.",
+    );
+  }
+
+  await db.runTransaction(async (transaction) => {
+    const itemSnapshot = await transaction.get(itemRef);
+    if (!itemSnapshot.exists) {
+      throw new HttpsError("not-found", "Este produto não existe mais.");
+    }
+
+    await transaction.get(availabilityRef);
+    const existingLoans = await transaction.get(
+      db.collection("loans").where("itemId", "==", itemId),
+    );
+    const periods = existingLoans.docs
+      .map((snapshot) => snapshot.data() as Loan)
+      .filter((existing) =>
+        existing.status === "reservado" || existing.status === "emprestado"
+      )
+      .map(availabilityPeriod);
+
+    if (periods.some((period) =>
+      inicio <= period.devolucao && devolucao >= period.inicio
+    )) {
+      throw new HttpsError(
+        "already-exists",
+        "Esse período já foi reservado. Escolha outras datas.",
+      );
+    }
+
+    transaction.create(loanRef, loan);
+    transaction.set(availabilityRef, {
+      periods: [...periods, {inicio, devolucao, status: "reservado"}]
+        .sort((left, right) => left.inicio.localeCompare(right.inicio)),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  });
+
+  return {id: loanRef.id, ...loan};
+});
+
+/**
+ * Rebuilds the sanitized public schedule, including loans created before deployment.
+ */
+export const refreshItemAvailability = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Entre para consultar os produtos.");
+  }
+  await refreshAvailabilityProjection(getFirestore());
+  return {success: true};
+});
+
+/**
+ * Keeps public availability synchronized without exposing borrower details or codes.
+ */
+export const syncLoanAvailability = onDocumentWritten(
+  "loans/{loanId}",
+  async (event) => {
+    const previous = event.data?.before.data() as Loan | undefined;
+    const current = event.data?.after.data() as Loan | undefined;
+    const itemIds = new Set(
+      [previous?.itemId, current?.itemId]
+        .filter((itemId): itemId is string => Boolean(itemId)),
+    );
+    const db = getFirestore();
+    await Promise.all(
+      [...itemIds].map((itemId) => rebuildItemAvailability(db, itemId)),
+    );
+  },
+);
+
+async function refreshAvailabilityProjection(
+  db: FirebaseFirestore.Firestore,
+): Promise<void> {
+  const [loansSnapshot, availabilitySnapshot] = await Promise.all([
+    db.collection("loans").get(),
+    db.collection("itemAvailability").get(),
+  ]);
+  const periodsByItem = new Map<string, ReturnType<typeof availabilityPeriod>[]>();
+  for (const snapshot of loansSnapshot.docs) {
+    const loan = snapshot.data() as Loan;
+    if (
+      !loan.itemId ||
+      (loan.status !== "reservado" && loan.status !== "emprestado")
+    ) {
+      continue;
+    }
+    const periods = periodsByItem.get(loan.itemId) || [];
+    periods.push(availabilityPeriod(loan));
+    periodsByItem.set(loan.itemId, periods);
+  }
+
+  const operations = new Map<string, {
+    ref: FirebaseFirestore.DocumentReference;
+    data?: {periods: ReturnType<typeof availabilityPeriod>[]};
+  }>();
+  for (const [itemId, periods] of periodsByItem) {
+    operations.set(itemId, {
+      ref: db.collection("itemAvailability").doc(itemId),
+      data: {
+        periods: periods.sort((left, right) =>
+          left.inicio.localeCompare(right.inicio)
+        ),
+      },
+    });
+  }
+  for (const snapshot of availabilitySnapshot.docs) {
+    if (!periodsByItem.has(snapshot.id)) {
+      operations.set(snapshot.id, {ref: snapshot.ref});
+    }
+  }
+
+  const entries = [...operations.values()];
+  for (let offset = 0; offset < entries.length; offset += 450) {
+    const batch = db.batch();
+    for (const entry of entries.slice(offset, offset + 450)) {
+      if (entry.data) {
+        batch.set(entry.ref, {
+          ...entry.data,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      } else {
+        batch.delete(entry.ref);
+      }
+    }
+    await batch.commit();
+  }
+}
+
+async function rebuildItemAvailability(
+  db: FirebaseFirestore.Firestore,
+  itemId: string,
+): Promise<void> {
+  const loans = await db.collection("loans")
+    .where("itemId", "==", itemId)
+    .get();
+  const periods = loans.docs
+    .map((snapshot) => snapshot.data() as Loan)
+    .filter((loan) =>
+      loan.status === "reservado" || loan.status === "emprestado"
+    )
+    .map(availabilityPeriod)
+    .sort((left, right) => left.inicio.localeCompare(right.inicio));
+  const ref = db.collection("itemAvailability").doc(itemId);
+  if (periods.length) {
+    await ref.set({periods, updatedAt: FieldValue.serverTimestamp()});
+  } else {
+    await ref.delete();
+  }
+}
+
+function availabilityPeriod(loan: Loan): {
+  inicio: string;
+  devolucao: string;
+  status: string;
+} {
+  const retiradaDate = typeof loan.retirado === "string" ?
+    loan.retirado.slice(0, 10) :
+    "";
+  return {
+    inicio: isCalendarDate(loan.inicio) ?
+      loan.inicio :
+      isCalendarDate(retiradaDate) ?
+        retiradaDate :
+        isCalendarDate(loan.criado) ? loan.criado : dateInSaoPaulo(0),
+    devolucao: isCalendarDate(loan.devolucao) ?
+      loan.devolucao :
+      dateInSaoPaulo(0),
+    status: loan.status || "reservado",
+  };
+}
+
+function isCalendarDate(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function calendarDayDifference(start: string, end: string): number {
+  return Math.round(
+    (Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) /
+      86400000,
+  );
+}
+
+function generateLoanCode(excluded = ""): string {
+  let code = "";
+  do {
+    code = Array.from(
+      {length: 6},
+      () => codeAlphabet[randomInt(codeAlphabet.length)],
+    ).join("");
+  } while (code === excluded);
+  return code;
+}
 
 export function generateCode(existing: Set<string>): string {
   let code: string;
@@ -129,10 +395,14 @@ export const createLoan = onCall(async (request) => {
 });
 
 interface Loan {
+  criado?: string;
   contato?: string;
   nome?: string;
+  userId?: string;
   itemId?: string;
+  inicio?: string;
   devolucao?: string;
+  retirado?: string;
   codigo?: string;
   codigoEntrega?: string;
   status?: string;

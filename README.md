@@ -2,6 +2,21 @@
 
 Aplicação web para controlar o empréstimo de produtos. Usuários podem criar uma conta, entrar com e-mail e senha ou Google, consultar produtos disponíveis e acompanhar seus empréstimos. Administradores gerenciam produtos, fotos, usuários e empréstimos.
 
+## Atualizações recentes
+
+- **20/10/2026:** o catálogo identifica produtos emprestados e permite agendar reservas para períodos posteriores à previsão de retorno, evitando conflito de datas.
+- **20/10/2026:** cada área tem uma busca própria com sugestões exibidas abaixo do campo; no catálogo de empréstimos, a busca considera somente o nome do produto.
+- **20/10/2026:** os empréstimos e produtos associados a cada usuário no painel administrativo podem ser expandidos para consultar fotos, descrição, status e datas sem deixar a tabela extensa.
+- **20/10/2026:** indicadores de carregamento aparecem junto às listas de dados do Firestore.
+- **20/10/2026:** a data da reserva aparece para usuários e administradores, e o rodapé foi centralizado.
+- **20/10/2026:** avisos de novidades separados por perfil aparecem após o login uma vez por conta e por perfil neste navegador. Usuários recebem orientações sobre catálogo, reservas e histórico; administradores recebem informações sobre buscas e ferramentas do painel. O aviso pode ser fechado; uma nova versão poderá aparecer em uma atualização futura.
+- **20/10/2026:** o rodapé identifica Samuel Anderson (criador) e Bruno Ferreira (tester), com links para seus perfis. A surpresa do criador é aberta ao clicar na logo do cartão da tela inicial, sem ação na logo do navbar.
+
+### Novidades exibidas para cada perfil
+
+- **Usuários:** disponibilidade e previsão de retorno dos produtos, reserva de períodos futuros, sugestões de busca pelo nome do produto, consulta da data da reserva e indicadores de carregamento do catálogo e do histórico.
+- **Administradores:** buscas específicas do painel, produtos e usuários, detalhes expansíveis dos empréstimos, proteção contra retirada duplicada, indicadores de carregamento e sincronização da disponibilidade pelo painel.
+
 ## Requisitos
 
 - Node.js e npm instalados.
@@ -41,6 +56,8 @@ Importe o repositório no Vercel usando a pasta raiz do projeto. O Vercel detect
 
 Em **Project Settings → Environment Variables**, cadastre as variáveis `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_MESSAGING_SENDER_ID` e `VITE_FIREBASE_APP_ID` com os valores do app Web Firebase. `VITE_FIREBASE_MEASUREMENT_ID` é opcional. A configuração local em `.env.local` não é enviada ao repositório; depois de cadastrar ou alterar as variáveis no Vercel, faça um novo deploy para incorporá-las ao build.
 
+O componente `@vercel/analytics/react` está incluído no app. A coleta do Vercel Web Analytics exige que o site esteja publicado na Vercel e que Web Analytics esteja habilitado no projeto; a versão publicada somente no Firebase Hosting não envia dados para o painel do Vercel.
+
 ## Configuração do Firebase
 
 ### Firebase Hosting
@@ -79,13 +96,13 @@ O cadastro pelo site cria contas comuns. A aplicação não oferece cadastro de 
 
 ### Firestore
 
-Crie o banco em **Firestore Database** e publique as regras do arquivo `firestore.rules`:
+Crie o banco em **Firestore Database** e publique as regras necessárias para reservas:
 
 ```bash
 firebase deploy --only firestore:rules --project emprestimo-2026
 ```
 
-As regras permitem que cada usuário leia seu perfil e seus empréstimos. Administradores são identificados pelo campo `role: "admin"` no documento `users/{UID}`.
+As reservas e a verificação de conflitos usam transações do Firestore diretamente no navegador; esse fluxo não depende de Cloud Functions nem do plano Blaze. A coleção `itemAvailability` contém somente datas, status e identificadores opacos das reservas, sem nomes, contatos ou códigos. Depois de publicar as regras, um administrador deve entrar no painel uma vez para sincronizar as reservas já existentes. Administradores são identificados pelo campo `role: "admin"` no documento `users/{UID}`.
 
 ### Criar ou promover um administrador
 
@@ -111,6 +128,7 @@ As imagens são otimizadas no navegador e salvas como Data URL no campo `photoUr
 | `npm start` | Inicia o servidor na porta 8080, acessível na rede local. |
 | `npm run dev` | Inicia o servidor de desenvolvimento Vite. |
 | `npm run build` | Gera a versão de produção na pasta `dist/`. |
+| `npm test` | Executa os testes automatizados com Vitest. |
 | `npm run preview` | Visualiza localmente a versão gerada em `dist/`. |
 | `npm run deploy` | Gera a versão de produção e publica no GitHub Pages usando `gh-pages`. |
 | `npm run deploy:firebase` | Gera a versão de produção e publica no Firebase Hosting. |
