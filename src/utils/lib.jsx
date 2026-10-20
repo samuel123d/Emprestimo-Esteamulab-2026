@@ -104,7 +104,7 @@ export function gerarCodigo(db, usados = []) {
 
   let code
   do {
-    code = Array.from({ length: 6 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('')
+    code = Array.from(crypto.getRandomValues(new Uint8Array(6)), b => alphabet[b % alphabet.length]).join('')
   } while (bloqueados.has(code))
   return code
 }
@@ -126,7 +126,7 @@ export const quando = days => (days < 0
       ? 'vence amanhã'
       : `vence em ${days} dias`)
 
-// Abre a composição do Gmail com o lembrete preenchido.
+// Abre o cliente de e-mail padrão com o lembrete preenchido.
 export function linkEmail(db, loan, agora = new Date()) {
   const codigoDevolucao = loan.codigoEntrega || loan.codigo || 'não informado'
   const subject = 'Lembrete de devolução - ESTEAMULAB'
@@ -141,14 +141,9 @@ export function linkEmail(db, loan, agora = new Date()) {
     'Atenciosamente,',
     'Equipe ESTEAMULAB',
   ].join('\n')
-  const params = new URLSearchParams({
-    view: 'cm',
-    fs: '1',
-    to: String(loan.contato || '').trim(),
-    su: subject,
-    body,
-  })
-  return `https://mail.google.com/mail/?${params.toString()}`
+  const to = String(loan.contato || '').trim()
+  const params = new URLSearchParams({ subject, body })
+  return `mailto:${to}?${params.toString()}`
 }
 
 // Monta o link do WhatsApp para usuários sem endereço de e-mail.
